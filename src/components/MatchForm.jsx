@@ -119,26 +119,26 @@ export default function MatchForm({ form, setForm, locations, addLocation, onCre
                 </div>
 
                 {/* Players & Notes */}
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="text-sm text-white font-medium">Max Players</label>
-                        <input
-                            type="number"
-                            min={2}
-                            className="mt-1 w-full rounded-xl bg-slate-900/60 border border-slate-700 px-3 py-2 text-slate-100 focus:outline-none focus:ring-2 focus:ring-yellow-400/40"
-                            value={form.maxPlayers}
-                            onChange={(e) => setForm({ ...form, maxPlayers: e.target.value })}
-                        />
-                    </div>
-                    <div>
-                        <label className="text-sm text-white font-medium">Notes</label>
-                        <input
-                            className="mt-1 w-full rounded-xl bg-slate-900/60 border border-slate-700 px-3 py-2 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400/40"
-                            value={form.notes}
-                            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                            placeholder="Bring water…"
-                        />
-                    </div>
+                <div>
+                    <label className="text-sm text-white font-medium">Max Players</label>
+                    <input
+                        type="number"
+                        min={2}
+                        className="mt-1 w-full rounded-xl bg-slate-900/60 border border-slate-700 px-3 py-2 text-slate-100 focus:outline-none focus:ring-2 focus:ring-yellow-400/40"
+                        value={form.maxPlayers}
+                        onChange={(e) => setForm({ ...form, maxPlayers: e.target.value })}
+                    />
+                </div>
+
+                <div>
+                    <label className="text-sm text-white font-medium">Notes</label>
+                    <textarea
+                        rows={3}
+                        className="mt-1 w-full rounded-xl bg-slate-900/60 border border-slate-700 px-3 py-2 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400/40 resize-none"
+                        value={form.notes}
+                        onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                        placeholder="Bring water, extra balls, jerseys..."
+                    />
                 </div>
 
                 {/* Create Button */}
