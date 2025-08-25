@@ -25,20 +25,33 @@ export default function JoinPage() {
         catch { showToast("Copy failed", "error"); }
     }, [showToast]);
 
-
-    // ===== Session check =====
+    // ===== Session check + Telegram finalize if query payload exists =====
     useEffect(() => {
         let dead = false;
         (async () => {
             try {
+                // 1) If Telegram sent signed fields via query (?id=&hash=&auth_date=...)
+                //    finalize with the server and establish session.
+                if (api.telegramFinalizeFromLocation) {
+                    try {
+                        await api.telegramFinalizeFromLocation();
+                    } catch (e) {
+                        // Don't break the flow—just show a toast and continue to /auth/me
+                        console.warn("Telegram finalize failed:", e);
+                        showToast(e.message || "Telegram login failed", "error");
+                    }
+                }
+
+                // 2) Fetch current session
                 const user = await api.me();
                 if (!dead && user) setMe(user);
             } finally {
                 if (!dead) setAuthTried(true);
             }
         })();
+
         return () => { dead = true; };
-    }, []);
+    }, [showToast]);
 
     // ===== Load match =====
     const loadMatch = useCallback(async () => {
@@ -102,15 +115,9 @@ export default function JoinPage() {
             window.location.href = "/";
             return;
         }
-
-        // Non-mock: only proceed if we have a matchId
-        if (!matchId) {
-            console.warn("Missing matchId; staying on page.");
-            return;
-        }
+        // Redirect to backend login, include current page as return target
         window.location.href = api.telegramLoginUrl(matchId);
     };
-
 
     function InvitePill({ copy }) {
         const url = typeof window !== "undefined" ? window.location.href : "";
@@ -121,7 +128,6 @@ export default function JoinPage() {
                     className="group inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs text-slate-200 shadow-lg hover:bg-slate-800 active:scale-[.99] transition"
                     title="Copy invite link"
                 >
-                    {/* chain/link icon */}
                     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
                         <path d="M10.59 13.41a1 1 0 010-1.41l3-3a1 1 0 111.41 1.41l-3 3a1 1 0 01-1.41 0z" />
                         <path d="M13.41 10.59a1 1 0 010 1.41l-3 3a1 1 0 01-1.41-1.41l3-3a1 1 0 011.41 0z" />
@@ -133,11 +139,10 @@ export default function JoinPage() {
         );
     }
 
-
     const handleLogout = async () => {
         try {
             await api.logout?.();
-            localStorage.removeItem("guestIdentity"); // also clear old guest storage
+            localStorage.removeItem("guestIdentity");
             setMe(null);
             showToast("Signed out");
         } catch (e) {
@@ -219,7 +224,6 @@ export default function JoinPage() {
 
     const TopBar = () => (
         <div className="flex items-center justify-between gap-2">
-
             {me ? (
                 <div className="flex w-full items-center gap-2">
                     {/* Left: Connect Telegram (only for guests) */}
@@ -242,7 +246,6 @@ export default function JoinPage() {
                         Sign out
                     </button>
                 </div>
-
             ) : null}
         </div>
     );
@@ -304,24 +307,21 @@ export default function JoinPage() {
     // ===== Not signed in → Auth choice =====
     if (authTried && !me) {
         return (
-
             <div className="min-h-screen grid place-items-center bg-slate-950 text-slate-100 px-4">
                 <div className="w-full max-w-lg space-y-6">
                     <TopBar />
 
-                    {/* Styled page title */}
                     <div className="text-center">
                         <h1 className="text-3xl font-extrabold tracking-tight">
-        <span className="bg-gradient-to-r from-yellow-300 via-yellow-400 to-amber-400 bg-clip-text text-transparent">
-          Sign in to join the match
-        </span>
+              <span className="bg-gradient-to-r from-yellow-300 via-yellow-400 to-amber-400 bg-clip-text text-transparent">
+                Sign in to join the match
+              </span>
                         </h1>
                         <p className="mt-2 text-sm text-slate-400">
                             Use Telegram for notifications, or continue as a guest.
                         </p>
                     </div>
 
-                    {/* (Invite link moved to compact pill at bottom; removed from here) */}
                     {matchLoading ? <MatchSkeleton /> : null}
 
                     <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl">
@@ -371,13 +371,11 @@ export default function JoinPage() {
                     ) : null}
                 </div>
 
-                {/* Compact invite pill at the bottom-right */}
                 {!matchLoading && <InvitePill copy={copy} />}
 
-                {/* Toast */}
                 {toast && (
                     <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-sm shadow-lg border
-      ${toast.type === "error" ? "bg-red-900/70 text-red-100 border-red-700" : "bg-slate-800/90 text-slate-100 border-slate-700"}`}>
+            ${toast.type === "error" ? "bg-red-900/70 text-red-100 border-red-700" : "bg-slate-800/90 text-slate-100 border-slate-700"}`}>
                         {toast.msg}
                     </div>
                 )}

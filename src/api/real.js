@@ -17,6 +17,16 @@ async function request(path, options = {}) {
     return res.status === 204 ? null : res.json();
 }
 
+function currentOrigin() {
+    if (typeof window === "undefined") return "";
+    return window.location.origin || "";
+}
+
+function currentJoinUrl(matchId) {
+    const origin = currentOrigin();
+    return `${origin}/join?mid=${encodeURIComponent(matchId)}`;
+}
+
 export const api = {
     // ----- Auth -----
     async me() {
@@ -35,7 +45,52 @@ export const api = {
     },
 
     telegramLoginUrl(matchId) {
-        return `${BASE_URL}/auth/telegram/login?mid=${encodeURIComponent(matchId)}`;
+        // Prefer server-driven redirect, but include a return URL for a smooth bounce-back
+        const url = new URL(`${BASE_URL}/auth/telegram/login`);
+        if (matchId) url.searchParams.set("mid", matchId);
+        if (typeof window !== "undefined") {
+            url.searchParams.set("redirect", currentJoinUrl(matchId || "demo-123"));
+        }
+        return url.toString();
+    },
+
+    /**
+     * Finalize Telegram login if Telegram (or your backend) sent the
+     * signed payload back to this page via query params:
+     *   id, hash, auth_date, first_name, last_name, username, photo_url
+     * If present, we POST it to /auth/telegram, set the server session cookie,
+     * then clean the URL (keep only ?mid=...).
+     *
+     * Returns the server response (e.g., { token, user } or just user/session),
+     * or null if no Telegram params were found.
+     */
+    async telegramFinalizeFromLocation() {
+        if (typeof window === "undefined") return null;
+
+        const sp = new URLSearchParams(window.location.search);
+        const hasCore =
+            sp.has("id") && sp.has("hash") && sp.has("auth_date");
+
+        if (!hasCore) return null;
+
+        const payload = {};
+        ["id", "hash", "auth_date", "first_name", "last_name", "username", "photo_url"]
+            .forEach((k) => {
+                if (sp.has(k)) payload[k] = sp.get(k);
+            });
+
+        // Send payload to server to verify + create session
+        const result = await request("/auth/telegram", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
+
+        // Clean sensitive params from the URL; keep ?mid=... if present
+        const mid = sp.get("mid");
+        const clean = `${window.location.pathname}${mid ? `?mid=${encodeURIComponent(mid)}` : ""}`;
+        window.history.replaceState({}, "", clean);
+
+        return result;
     },
 
     // ----- Matches -----
