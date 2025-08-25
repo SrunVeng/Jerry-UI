@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 
 export default function MatchCard({
                                       match,
@@ -8,6 +8,8 @@ export default function MatchCard({
                                       onDelete,
                                       onShare,
                                   }) {
+    const [confirmOpen, setConfirmOpen] = useState(false);
+
     const joined = isJoined(match);
     const count = match.players.length;
     const cap = Math.max(2, Number(match.maxPlayers) || 12);
@@ -82,7 +84,7 @@ export default function MatchCard({
                             Share
                         </button>
                         <button
-                            onClick={() => onDelete(match.id)}
+                            onClick={() => setConfirmOpen(true)}
                             className="rounded-xl border border-red-700/40 bg-red-900/30 px-3 py-2 text-red-200 hover:bg-red-900/40 active:scale-[.98] transition"
                             title="Delete match"
                         >
@@ -104,24 +106,31 @@ export default function MatchCard({
                     </div>
                 </div>
 
-                {/* Numbered players list */}
+                {/* Numbered players list with color logic */}
                 <div className="mt-3 flex flex-wrap gap-2">
                     {match.players.length === 0 ? (
                         <span className="text-sm text-slate-400">No one joined yet.</span>
                     ) : (
-                        match.players.map((p, idx) => (
-                            <span
-                                key={p}
-                                className="inline-flex items-center gap-2 rounded-full bg-slate-900/70 border border-slate-700 text-slate-100 px-3 py-1 text-xs"
-                                title={p}
-                            >
-                {/* number bubble */}
-                                <span className="h-5 w-5 grid place-items-center rounded-full bg-yellow-400 text-slate-900 text-[10px] font-extrabold">
-                  {idx + 1}
+                        match.players.map((p, idx) => {
+                            const inLimit = idx + 1 <= cap;
+                            return (
+                                <span
+                                    key={p}
+                                    className="inline-flex items-center gap-2 rounded-full bg-slate-900/70 border border-slate-700 text-slate-100 px-3 py-1 text-xs"
+                                    title={p}
+                                >
+                  {/* number bubble with conditional color */}
+                                    <span
+                                        className={`h-5 w-5 grid place-items-center rounded-full text-slate-900 text-[10px] font-extrabold ${
+                                            inLimit ? "bg-green-400" : "bg-yellow-400"
+                                        }`}
+                                    >
+                    {idx + 1}
+                  </span>
+                  <span className="truncate max-w-[9rem]">{p}</span>
                 </span>
-                <span className="truncate max-w-[9rem]">{p}</span>
-              </span>
-                        ))
+                            );
+                        })
                     )}
                 </div>
 
@@ -158,6 +167,36 @@ export default function MatchCard({
           </span>
                 </div>
             </div>
+
+            {/* Delete confirmation popup */}
+            {confirmOpen && (
+                <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
+                    <div className="bg-slate-800 border border-slate-600 rounded-2xl shadow-xl p-6 w-[90%] max-w-sm">
+                        <h4 className="text-lg font-semibold text-white">
+                            Are you sure you want to delete?
+                        </h4>
+                        <p className="text-sm text-slate-300 mt-1">This action cannot be undone.</p>
+
+                        <div className="mt-5 flex justify-end gap-3">
+                            <button
+                                onClick={() => setConfirmOpen(false)}
+                                className="px-4 py-2 rounded-xl bg-slate-700 text-slate-200 hover:bg-slate-600 transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    onDelete(match.id);
+                                    setConfirmOpen(false);
+                                }}
+                                className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition"
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
