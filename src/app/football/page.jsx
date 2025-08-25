@@ -1,6 +1,5 @@
 "use client";
 
-// src/app/football/page.jsx
 import React, { useEffect, useState } from "react";
 import MatchForm from "../../components/MatchForm.jsx";
 import MatchCard from "../../components/MatchCard.jsx";
@@ -44,6 +43,16 @@ export default function FootballSignupApp() {
 
     const isJoined = (m) =>
         myName && m.players.some((p) => p.toLowerCase() === (myName || "").toLowerCase());
+
+    // === NEW: logout ===
+    function handleLogout() {
+        setMyName("");
+        // optional: clear any local storage you might add later
+        // localStorage.removeItem("myName");
+
+        // redirect to auth page
+        window.location.href = "/auth";
+    }
 
     function createMatch() {
         const m = {
@@ -107,7 +116,6 @@ export default function FootballSignupApp() {
         url.searchParams.set("match", m.id);
         url.searchParams.set("join", myName || "YourName");
 
-        // clipboard with fallback
         if (navigator.clipboard?.writeText) {
             navigator.clipboard.writeText(url.toString());
             alert("Sharable join link copied! Paste it in Telegram.");
@@ -125,6 +133,19 @@ export default function FootballSignupApp() {
     return (
         <div className="min-h-screen w-full overflow-x-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-900">
             <div className="mx-auto max-w-screen-xl px-4 sm:px-6 lg:px-8 py-6 md:py-10">
+
+                {/* Header with logout */}
+                <div className="flex items-center justify-between mb-6">
+                    <h1 className="text-xl font-bold text-yellow-400">⚽ Jerry FC Matches</h1>
+                    {myName && (
+                        <button
+                            onClick={handleLogout}
+                            className="rounded-lg bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 text-sm font-semibold"
+                        >
+                            Logout
+                        </button>
+                    )}
+                </div>
 
                 <div className="mt-8 grid grid-cols-1 gap-6 md:gap-8 md:grid-cols-3">
                     {/* Create Match */}

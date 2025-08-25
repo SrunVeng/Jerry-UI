@@ -1,17 +1,16 @@
-"use client";
-
-import React from "react";
-import FootballSignupApp from "./app/football/page.jsx";
-import Header from "./app/football/header.jsx"
-import Footer from "./app/football/footer.jsx"
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Home from "./app/football/home.jsx";
+import AuthPage from "./app/football/AuthPage.jsx";
 
 
 export default function App() {
     return (
-        <div className="min-h-screen">
-            <Header />
-            <FootballSignupApp />
-            <Footer />
-        </div>
+        <BrowserRouter>
+            <Routes>
+                <Route path="/auth" element={<AuthPage />} />
+                <Route path="/" element={<Home />} />
+                {/* other routes */}
+            </Routes>
+        </BrowserRouter>
     );
 }
