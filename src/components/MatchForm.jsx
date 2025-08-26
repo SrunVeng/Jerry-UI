@@ -1,39 +1,67 @@
 import React, { useMemo, useState } from "react";
+import { api } from "../api/real.js"; // adjust path if needed
 
 const HOME_TEAM = "Jerry FC";
 
 export default function MatchForm({ form, setForm, locations = [], addLocation, onCreate }) {
     const [newLoc, setNewLoc] = useState("");
     const [touched, setTouched] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [err, setErr] = useState("");
 
     const canCreate = useMemo(() => {
         const opponent = (form.opponent || "").trim();
         const location = (form.location || "").trim();
         const date = (form.date || "").trim();
         const time = (form.time || "").trim();
-        return opponent && location && date && time;
-    }, [form]);
+        return opponent && location && date && time && !submitting;
+    }, [form, submitting]);
 
-    function handleCreate(e) {
+    const showErr = (field) => touched && !(form[field] || "").trim();
+
+    async function handleCreate(e) {
         e.preventDefault();
         setTouched(true);
+        setErr("");
         if (!canCreate) return;
 
         const opponent = (form.opponent || "").trim();
-        const clean = {
-            // id can be added by parent if needed
-            title: `${HOME_TEAM} vs ${opponent}`,
-            date: (form.date || "").trim(),
+        const payload = {
+            opponentName: opponent,
+            matchDate: (form.date || "").trim(),
             time: (form.time || "").trim(),
             location: (form.location || "").trim(),
-            maxPlayers: Math.max(2, Number(form.maxPlayers) || 12),
+            numberPlayer: Math.max(2, Number(form.maxPlayers) || 12),
             notes: (form.notes || "").trim(),
         };
 
-        onCreate?.(clean);
-    }
+        setSubmitting(true);
+        try {
+            const created = await api.createMatch(payload);
 
-    const showErr = (field) => touched && !(form[field] || "").trim();
+            // Optional: decorate for UI here (title not required by backend)
+            const decorated = {
+                ...created,
+                title: `${HOME_TEAM} vs ${opponent}`,
+            };
+
+            onCreate?.(decorated);
+
+            // Reset form
+            setForm({
+                opponent: "",
+                date: "",
+                time: "",
+                location: "",
+                maxPlayers: 12,
+                notes: "",
+            });
+        } catch (e) {
+            setErr(e?.message || "Failed to create match.");
+        } finally {
+            setSubmitting(false);
+        }
+    }
 
     return (
         <div className="rounded-2xl bg-slate-800/80 border border-slate-700 shadow-xl backdrop-blur-md">
@@ -41,7 +69,11 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
             <div className="px-5 pt-5 space-y-1">
                 <h2 className="text-xl font-bold text-yellow-400 tracking-tight">Create New Match</h2>
                 <p className="text-slate-300 text-xs">Quickly set up a match and invite your friends</p>
-
+                {err && (
+                    <p className="text-xs mt-1 px-3 py-2 rounded-lg bg-red-900/30 border border-red-800 text-red-200">
+                        {err}
+                    </p>
+                )}
             </div>
 
             <form onSubmit={handleCreate} className="p-5 pb-6 space-y-4">
@@ -57,6 +89,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                         value={form.opponent || ""}
                         onChange={(e) => setForm({ ...form, opponent: e.target.value })}
                         placeholder="e.g. Community United"
+                        disabled={submitting}
                     />
                     {showErr("opponent") && <p className="mt-1 text-xs text-red-300">Opponent is required.</p>}
                 </div>
@@ -74,6 +107,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                             }`}
                             value={form.date || ""}
                             onChange={(e) => setForm({ ...form, date: e.target.value })}
+                            disabled={submitting}
                         />
                         {showErr("date") && <p className="mt-1 text-xs text-red-300">Date is required.</p>}
                     </div>
@@ -88,6 +122,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                             }`}
                             value={form.time || ""}
                             onChange={(e) => setForm({ ...form, time: e.target.value })}
+                            disabled={submitting}
                         />
                         {showErr("time") && <p className="mt-1 text-xs text-red-300">Time is required.</p>}
                     </div>
@@ -104,6 +139,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                         }`}
                         value={form.location || ""}
                         onChange={(e) => setForm({ ...form, location: e.target.value })}
+                        disabled={submitting}
                     >
                         {form.location ? null : (
                             <option value="" disabled>
@@ -124,6 +160,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                             value={newLoc}
                             onChange={(e) => setNewLoc(e.target.value)}
                             placeholder="Add new location…"
+                            disabled={submitting}
                         />
                         <button
                             type="button"
@@ -136,6 +173,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                             }}
                             className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2 text-slate-100 hover:bg-slate-800 active:scale-[.98] transition"
                             title="Add location"
+                            disabled={submitting}
                         >
                             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
                                 <path d="M11 11V5a1 1 0 1 1 2 0v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6z" />
@@ -153,7 +191,8 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                         min={2}
                         className="mt-1 w-full rounded-xl bg-slate-900/60 border border-slate-700 px-3 py-2 text-slate-100 focus:outline-none focus:ring-2 focus:ring-yellow-400/40"
                         value={form.maxPlayers ?? 12}
-                        onChange={(e) => setForm({ ...form, maxPlayers: e.target.value })}
+                        onChange={(e) => setForm({ ...form, maxPlayers: Number(e.target.value) })}
+                        disabled={submitting}
                     />
                     <p className="mt-1 text-[11px] text-slate-400">Minimum is 2. Default is 12.</p>
                 </div>
@@ -167,6 +206,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                         value={form.notes || ""}
                         onChange={(e) => setForm({ ...form, notes: e.target.value })}
                         placeholder="Bring water, extra balls, jerseys..."
+                        disabled={submitting}
                     />
                     <div className="mt-1 text-[11px] text-slate-500 text-right">
                         {(form.notes || "").length} chars
@@ -188,7 +228,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
                             <path d="M11 11V5a1 1 0 1 1 2 0v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6z" />
                         </svg>
-                        Create Match
+                        {submitting ? "Creating..." : "Create Match"}
                     </button>
 
                     <button
@@ -205,6 +245,7 @@ export default function MatchForm({ form, setForm, locations = [], addLocation, 
                         }
                         className="px-4 py-3 rounded-2xl border border-slate-700 bg-slate-900/60 text-slate-100 hover:bg-slate-800 active:scale-[.99] transition"
                         title="Reset form"
+                        disabled={submitting}
                     >
                         Reset
                     </button>

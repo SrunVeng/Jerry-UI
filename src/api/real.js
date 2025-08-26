@@ -4,22 +4,99 @@
 // VITE_API_BASE=http://localhost:8080/api
 const BASE_URL = (import.meta.env.VITE_API_BASE || "http://localhost:8080/api").replace(/\/+$/, "");
 
-// Toggle only if your backend uses cookie sessions.
-// If you use JWT in JSON + localStorage, leave false.
+// Set true only if your backend uses cookie sessions (HTTP-only cookies).
+// If you use JWT via Authorization header (recommended), keep false.
 const USE_COOKIES = false;
+
+// Where to send users when they need to re-auth
+const LOGIN_PATH = "/auth"; // change if your login route differs
 
 /* ---------------- internal helpers ---------------- */
 
 function fullUrl(path) {
-    // ensure exactly one slash between base and path
     const p = path.startsWith("/") ? path : `/${path}`;
     return `${BASE_URL}${p}`;
 }
 
-/** Build a direct Telegram login URL on the backend with a redirect (default "/"). */
+function getToken() {
+    try {
+        // prefer lowercase (new)
+        let raw = localStorage.getItem("accessToken");
+        if (raw) return String(raw).replace(/^"|"$/g, "");
+        // legacy fallback
+        raw = localStorage.getItem("AccessToken");
+        if (raw) return String(raw).replace(/^"|"$/g, "");
+        // optional fallback if embedded somewhere else
+        const auth = localStorage.getItem("authIdentity");
+        if (auth) {
+            const obj = JSON.parse(auth);
+            if (obj?.token) return String(obj.token);
+        }
+    } catch {}
+    return null;
+}
 
+function getRefreshToken() {
+    try {
+        const raw = localStorage.getItem("refreshToken");
+        if (raw) return String(raw).replace(/^"|"$/g, "");
+    } catch {}
+    return null;
+}
 
-/** Unified fetch wrapper: timeout, (optional) cookies, JSON/text handling, better errors */
+function setAccessToken(tok) {
+    try {
+        if (tok) localStorage.setItem("accessToken", tok);
+    } catch {}
+}
+
+function setRefreshToken(tok) {
+    try {
+        if (tok) localStorage.setItem("refreshToken", tok);
+    } catch {}
+}
+
+function setTokensFromLoginResponse(res) {
+    try {
+        // very forgiving shape extraction
+        const at =
+            res?.accessToken ||
+            res?.token ||
+            res?.data?.accessToken ||
+            res?.data?.token;
+        const rt =
+            res?.refreshToken ||
+            res?.data?.refreshToken;
+        if (at) setAccessToken(at);
+        if (rt) setRefreshToken(rt);
+    } catch {}
+}
+
+function clearAuth() {
+    try {
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("AccessToken");
+        localStorage.removeItem("refreshToken");
+        localStorage.removeItem("authIdentity");
+    } catch {}
+}
+
+function redirectToLogin() {
+    try {
+        const here =
+            (typeof window !== "undefined" && window.location && window.location.pathname + window.location.search) ||
+            "/";
+        // avoid redirect-loop if already on login page
+        if (typeof window !== "undefined" && !here.startsWith(LOGIN_PATH)) {
+            const to = `${LOGIN_PATH}?next=${encodeURIComponent(here)}`;
+            window.location.replace(to);
+        }
+    } catch {
+        // swallow
+    }
+}
+
+// ---- core request with refresh-once ----
 async function request(path, options = {}) {
     const {
         method = "GET",
@@ -27,6 +104,7 @@ async function request(path, options = {}) {
         headers = {},
         credentials = USE_COOKIES ? "include" : "omit",
         timeout = 15000,
+        _retry // internal flag to avoid infinite loops
     } = options;
 
     const controller = new AbortController();
@@ -41,10 +119,18 @@ async function request(path, options = {}) {
             signal: controller.signal,
         };
 
+        if (!USE_COOKIES) {
+            const token = getToken();
+            if (token) init.headers["Authorization"] ||= `Bearer ${token}`;
+        }
+
         if (body !== undefined) {
             if (typeof body === "string") {
                 init.body = body;
                 init.headers["Content-Type"] ||= "application/json";
+            } else if (body instanceof FormData || body instanceof Blob) {
+                // let browser set multipart/form-data or blob content-type
+                init.body = body;
             } else {
                 init.body = JSON.stringify(body);
                 init.headers["Content-Type"] ||= "application/json";
@@ -57,19 +143,76 @@ async function request(path, options = {}) {
         const isJson = contentType.includes("application/json");
         const payload = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
 
+        // ----- handle non-OK -----
         if (!res.ok) {
+            // 401 → try refresh once (if we have a refresh token)
+            if (res.status === 401 && !_retry) {
+                const rt = getRefreshToken();
+                if (rt) {
+                    try {
+                        const refreshRes = await fetch(fullUrl("/auth/refresh"), {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            credentials,
+                            body: JSON.stringify({ refreshToken: rt }),
+                        });
+
+                        if (refreshRes.ok) {
+                            const refreshCT = refreshRes.headers.get("content-type") || "";
+                            const refreshJson = refreshCT.includes("application/json")
+                                ? await refreshRes.json().catch(() => null)
+                                : null;
+
+                            const newAccess =
+                                refreshJson?.accessToken ||
+                                refreshJson?.token ||
+                                refreshJson?.data?.accessToken ||
+                                refreshJson?.data?.token;
+
+                            const newRefresh =
+                                refreshJson?.refreshToken ||
+                                refreshJson?.data?.refreshToken;
+
+                            if (newAccess) {
+                                setAccessToken(newAccess);
+                                if (newRefresh) setRefreshToken(newRefresh);
+
+                                // retry original request with the new token
+                                const retryHeaders = { ...headers, Authorization: `Bearer ${newAccess}` };
+                                return await request(path, { ...options, headers: retryHeaders, _retry: true });
+                            }
+                        }
+                    } catch {
+                        // ignore and fall through
+                    }
+                }
+
+                // refresh failed or no refresh available → clear and redirect to login
+                clearAuth();
+                redirectToLogin();
+            }
+
             const msg =
                 (isJson && payload && (payload.message || payload.error || payload.error_code)) ||
                 (typeof payload === "string" && payload) ||
                 `${res.status} ${res.statusText}`;
-            throw new Error(msg);
+
+            const err = Object.assign(new Error(msg), { status: res.status, payload });
+            throw err;
         }
 
         if (res.status === 204) return null;
-        return payload;
+        return payload; // return as-is (you can unwrap .data in specific API methods if desired)
     } finally {
         clearTimeout(timer);
     }
+}
+
+// Build absolute share URL using current origin
+function shareUrl(matchId) {
+    const base =
+        (typeof window !== "undefined" && window.location && window.location.origin) || "";
+    return `${base}/join?mid=${encodeURIComponent(matchId)}`;
 }
 
 /* ---------------- public api ---------------- */
@@ -77,62 +220,96 @@ async function request(path, options = {}) {
 export const api = {
     /* ----- Auth ----- */
 
-    // GET /api/auth/me
-    me() {
-        return request("/auth/me");
+    async me() {
+        try {
+            const me = await request("/auth/me", { method: "GET" });
+            return me || null;
+        } catch (e) {
+            if (e?.status === 404) return null;
+            throw e;
+        }
     },
 
-    // POST /api/auth/guest/login  (expects { uuid, displayName })
     guestAuth(guest) {
-        return request("/api/auth/guest/login", {
+        return request("/auth/guest/login", {
             method: "POST",
             body: { uuid: guest.uuid, displayName: guest.displayName },
         });
     },
 
-    // POST /api/auth/logout
-    logout() {
-        return request("/auth/logout", { method: "POST" });
+    async logout() {
+        try {
+            await request("/auth/logout", { method: "POST" });
+        } finally {
+            clearAuth();
+            redirectToLogin();
+        }
     },
 
-    /* ----- Telegram ----- */
+    // username/password login
+    async LoginAuth(payload) {
+        const out = await request("/auth/user/login", { method: "POST", body: payload });
+        // persist tokens so subsequent calls include Authorization
+        setTokensFromLoginResponse(out);
+        return out;
+    },
 
-    // POST /api/auth/telegram/login (snake_case fields from Telegram)
-    LoginAuth(payload) {
-        return request("/api/auth/user/login", {
+    /* ----- Matches ----- */
+    // If your backend prefers /match/create keep as-is; recommend moving to /football/matches for consistency.
+
+    listMatches() {
+        return request("/football/matches", { method: "GET" });
+    },
+
+    getMatch(id) {
+        return request(`/football/matches/${encodeURIComponent(id)}`, { method: "GET" });
+    },
+
+    getMatchAll() {
+        return request(`/match/getAll`, { method: "GET" });
+    },
+
+    // /match/create expects { opponentName, matchDate, time, location, numberPlayer, notes }
+    createMatch(data) {
+        return request("/match/create", {
             method: "POST",
-            body: payload,
+            body: {
+                opponentName: data.opponentName,
+                matchDate: data.matchDate,
+                time: data.time,
+                location: data.location,
+                numberPlayer: data.numberPlayer,
+                notes: data.notes,
+            },
         });
     },
 
-    /**
-     * If Telegram redirects back with ?id=&hash=&auth_date=...
-     * Call once on landing page to finalize; it POSTs to /auth/telegram/login.
-     */
-    async telegramFinalizeFromLocation() {
-        if (typeof window === "undefined") return null;
-
-        const sp = new URLSearchParams(window.location.search);
-        const hasCore = sp.has("id") && sp.has("hash") && sp.has("auth_date");
-        if (!hasCore) return null;
-
-        const payload = {};
-        ["id", "hash", "auth_date", "first_name", "last_name", "username", "photo_url"].forEach((k) => {
-            if (sp.has(k)) payload[k] = sp.get(k);
+    updateMatch(id, patch) {
+        // if your backend truly uses /match/create/:id, keep it; otherwise consider /football/matches/:id
+        return request(`/match/create/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            body: patch,
         });
-
-        const result = await request("/auth/telegram/login", {
-            method: "POST",
-            body: payload,
-        });
-
-        // Clean the URL completely (no match params anymore)
-        const clean = `${window.location.pathname}`;
-        window.history.replaceState({}, "", clean);
-
-        return result;
     },
 
-    // Build backend login URL for redirect flow (defaults to "/")
+    deleteMatch(id) {
+        return request(`/football/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
+    },
 
+    join(id) {
+        return request(`/football/matches/${encodeURIComponent(id)}/join`, { method: "POST" });
+    },
+
+    leave(id) {
+        return request(`/football/matches/${encodeURIComponent(id)}/leave`, { method: "POST" });
+    },
+
+    kick(id, playerId) {
+        return request(
+            `/football/matches/${encodeURIComponent(id)}/kick/${encodeURIComponent(playerId)}`,
+            { method: "POST" },
+        );
+    },
+
+    shareUrl,
 };

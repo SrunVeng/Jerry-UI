@@ -2,20 +2,15 @@ import React, { useMemo, useState } from "react";
 
 /**
  * Props:
- *  - match: {
- *      id, title, date, time, location, locationUrl, maxPlayers,
- *      createdBy,
- *      players: string[] | { id: string, name: string, source?: "telegram"|"guest", status?: "CONFIRMED"|"WAITLIST" }[],
- *      notes?: string
- *    }
- *  - currentUserId: string                   // from session (telegram user id or guest uuid)
- *  - currentUserSource: "telegram" | "guest" // identify permission
+ *  - match: { id, title, date, time, location, locationUrl, maxPlayers, createdBy, players, notes? }
+ *  - currentUserId: string
+ *  - currentUserSource: "telegram" | "guest"
  *  - isJoined(match): boolean
  *  - onJoin(matchId)
  *  - onLeave(matchId)
  *  - onDelete(matchId)
  *  - onShare(match)
- *  - onKick(matchId, playerId)               // removal handler
+ *  - onKick(matchId, playerId)
  */
 export default function MatchCard({
                                       match,
@@ -31,19 +26,24 @@ export default function MatchCard({
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const [kickTarget, setKickTarget] = useState(null); // { id, name }
 
-    // Normalize players to objects
+    // Normalize players to objects (supports legacy string array)
     const players = useMemo(() => {
         if (!Array.isArray(match.players) || match.players.length === 0) return [];
         const first = match.players[0];
         if (typeof first === "string") {
             return match.players.map((name, i) => ({
-                id: `tmp-${i + 1}`, // fallback id for legacy arrays; backend should send real ids
+                id: `tmp-${i + 1}`,
                 name: String(name),
                 source: undefined,
                 status: undefined,
             }));
         }
-        return match.players;
+        return match.players.map((p, i) => ({
+            id: p.id ?? `tmp-${i + 1}`,
+            name: p.name ?? String(p.username ?? p.displayName ?? "Unknown"),
+            source: p.source,
+            status: p.status,
+        }));
     }, [match.players]);
 
     const joined = isJoined(match);
@@ -56,28 +56,23 @@ export default function MatchCard({
 
     return (
         <div className="rounded-2xl border border-slate-700 bg-gradient-to-b from-slate-800/80 via-slate-800/70 to-slate-900 shadow-xl backdrop-blur-md overflow-hidden">
-            {/* Top strip */}
             <div className="h-1.5 w-full bg-gradient-to-r from-yellow-400 via-yellow-300 to-yellow-500" />
 
             <div className="p-5 md:p-6">
-                {/* Title & actions */}
                 <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                         <h3 className="text-lg md:text-xl font-bold text-white truncate">
                             {match.title || "Jerry FC Match"}
                         </h3>
 
-                        {/* Date / Time / Location */}
                         <div className="mt-1 text-sm text-slate-100 flex flex-wrap items-center gap-x-4 gap-y-1">
-                            {/* Calendar */}
-                            <span className="inline-flex items-center gap-1">
+              <span className="inline-flex items-center gap-1">
                 <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor">
                   <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zm12 9H5v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8zM6 7h12V6H6v1z" />
                 </svg>
                 <span>{match.date}</span>
               </span>
 
-                            {/* Time */}
                             <span className="inline-flex items-center gap-1">
                 <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor">
                   <path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm1 10V7a1 1 0 1 0-2 0v6a1 1 0 0 0 .293.707l3 3a1 1 0 1 0 1.414-1.414L13 12z" />
@@ -85,7 +80,6 @@ export default function MatchCard({
                 <span>{match.time}</span>
               </span>
 
-                            {/* Location */}
                             <span className="inline-flex items-center gap-1 text-slate-300">
                 <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor">
                   <path d="M12 2C8.14 2 5 5.14 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.86-3.14-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z" />
@@ -105,7 +99,6 @@ export default function MatchCard({
                         </div>
                     </div>
 
-                    {/* Small actions */}
                     <div className="flex items-center gap-2 shrink-0">
                         <button
                             onClick={() => onShare && onShare(match)}
@@ -124,7 +117,6 @@ export default function MatchCard({
                     </div>
                 </div>
 
-                {/* Capacity bar */}
                 <div className="mt-4">
                     <div className="flex justify-between text-xs text-slate-300">
                         <span>Players</span>
@@ -135,7 +127,6 @@ export default function MatchCard({
                     </div>
                 </div>
 
-                {/* Players list (Guests highlighted, Waitlist badge, TG can kick) */}
                 <div className="mt-3 flex flex-wrap gap-2">
                     {players.length === 0 ? (
                         <span className="text-sm text-slate-400">No one joined yet.</span>
@@ -144,10 +135,7 @@ export default function MatchCard({
                             const inLimit = idx + 1 <= cap;
                             const canKick = canCurrentUserKick && typeof onKick === "function";
                             const isGuest = pl.source === "guest";
-                            const isYou =
-                                !!currentUserId && (pl.id === currentUserId);
-
-                            // derive waitlist if index overflow OR status says WAITLIST
+                            const isYou = !!currentUserId && (pl.id === currentUserId);
                             const isWaitlist = !inLimit || pl.status === "WAITLIST";
 
                             return (
@@ -160,22 +148,18 @@ export default function MatchCard({
                                     }`}
                                     title={pl.name}
                                 >
-                  {/* number bubble with conditional color */}
-                                    <span
-                                        className={`h-5 w-5 grid place-items-center rounded-full text-slate-900 text-[10px] font-extrabold ${
-                                            inLimit ? "bg-green-400" : "bg-yellow-400"
-                                        }`}
-                                    >
+                  <span
+                      className={`h-5 w-5 grid place-items-center rounded-full text-slate-900 text-[10px] font-extrabold ${
+                          inLimit ? "bg-green-400" : "bg-yellow-400"
+                      }`}
+                  >
                     {idx + 1}
                   </span>
 
-                  <span
-                      className={`truncate max-w-[9rem] ${isYou ? "font-semibold text-white" : ""}`}
-                  >
+                  <span className={`truncate max-w-[9rem] ${isYou ? "font-semibold text-white" : ""}`}>
                     {pl.name}{isYou ? " (you)" : ""}
                   </span>
 
-                                    {/* source badge */}
                                     {pl.source && (
                                         <span
                                             className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
@@ -188,14 +172,12 @@ export default function MatchCard({
                     </span>
                                     )}
 
-                                    {/* waitlist badge */}
                                     {isWaitlist && (
                                         <span className="text-[10px] px-1.5 py-0.5 rounded-full border bg-slate-800/60 border-slate-600 text-slate-200">
                       Waitlist
                     </span>
                                     )}
 
-                                    {/* Telegram users can remove anyone; guests see no remove */}
                                     {canKick && (
                                         <button
                                             onClick={() => setKickTarget({ id: pl.id, name: pl.name })}
@@ -213,12 +195,10 @@ export default function MatchCard({
                     )}
                 </div>
 
-                {/* Notes */}
                 {match.notes?.trim() ? (
                     <p className="mt-3 text-sm text-slate-300 break-words">{match.notes}</p>
                 ) : null}
 
-                {/* Join / Leave */}
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                     {!joined ? (
                         <button
@@ -247,7 +227,6 @@ export default function MatchCard({
                 </div>
             </div>
 
-            {/* Delete confirmation modal */}
             {confirmDeleteOpen && (
                 <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
                     <div className="bg-slate-800 border border-slate-600 rounded-2xl shadow-xl p-6 w-[90%] max-w-sm">
@@ -275,7 +254,6 @@ export default function MatchCard({
                 </div>
             )}
 
-            {/* Kick confirmation modal */}
             {kickTarget && (
                 <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
                     <div className="bg-slate-800 border border-slate-600 rounded-2xl shadow-xl p-6 w-[90%] max-w-sm">

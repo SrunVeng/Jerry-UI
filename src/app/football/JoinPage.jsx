@@ -1,5 +1,8 @@
+"use client";
+
 import React, { useEffect, useState, useCallback } from "react";
-import { api } from "../../api/client";
+// If you re-export from an index, keep "../../api/client"; otherwise point to the real file:
+import { api } from "../../api/real.js";
 
 import AuthGate from "../../components/Auth/AuthGate.jsx";
 import InviteBar from "../../components/Auth/InviteBar.jsx";
@@ -15,6 +18,7 @@ export default function JoinPage() {
 
     const [me, setMe] = useState(null);
     const [authTried, setAuthTried] = useState(false);
+    const [authSubmitting, setAuthSubmitting] = useState(false);
 
     // 1) Finalize Telegram (if query has tg params), then try to load current session
     useEffect(() => {
@@ -44,56 +48,92 @@ export default function JoinPage() {
         };
     }, []);
 
-    // 2)  User Login handler
-    const handleLogin = useCallback(async ({ username, password }) => {
-        if (!username || !password) {
-            showToast("Username and password required", "error");
-            return;
-        }
-
-        const payload = { username, password };
-
-        try {
-            // Store lightweight identity
-            try {
-                localStorage.setItem("authIdentity", JSON.stringify({ username }));
-            } catch {
-                /* ignore */
-            }
-
-            // Call your API (fetch version)
-            const res = await fetch("http://localhost:8080/api/auth/user/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-
-            if (!res.ok) {
-                if (res.status === 500) {
-                    showToast("Invalid Username or Password", "error");
-                } else {
-                    showToast(`Login failed: ${res.status}`, "error");
-                }
+// 2) User Login handler (username/password)
+    const handleLogin = useCallback(
+        async ({ username, password }) => {
+            if (!username || !password) {
+                showToast("Username and password required", "error");
                 return;
             }
 
-            const saved = await res.json();
-
-            if (saved?.token) {
+            setAuthSubmitting(true);
+            try {
+                // Persist lightweight identity (optional)
                 try {
-                    localStorage.setItem("accessToken", saved.token);
+                    localStorage.setItem("authIdentity", JSON.stringify({ username }));
                 } catch {
                     /* ignore */
                 }
+
+                // Call your API client (uses VITE_API_BASE and auto-attach Authorization later)
+                const resp = await api.LoginAuth({ username, password });
+
+                // Support both flat and enveloped responses
+                const token =
+                    resp?.accessToken || // flat
+                    resp?.token ||
+                    resp?.access_token ||
+                    resp?.data?.accessToken || // enveloped
+                    resp?.data?.token ||
+                    resp?.data?.access_token;
+
+                const refresh =
+                    resp?.refreshToken ||
+                    resp?.data?.refreshToken;
+
+                if (!token) {
+                    showToast("Login succeeded but no token returned", "error");
+                    return;
+                }
+
+                // Persist tokens (prefer lower-case key name)
+                try {
+                    localStorage.setItem("accessToken", token);
+                    if (refresh) localStorage.setItem("refreshToken", refresh);
+                } catch {
+                    /* ignore */
+                }
+
+                // Optional: refresh current user or just redirect
+                try {
+                    const user = await api.me();
+                    setMe(user || null);
+                } catch {
+                    /* ignore */
+                }
+
+                // Go to home
+                window.location.replace("/");
+            } catch (err) {
+                // Friendly error messages
+                const status =
+                    err?.status ??
+                    err?.payload?.status ??
+                    err?.payload?.status_code ??
+                    err?.payload?.code;
+
+                let msg;
+                if (status === 401) {
+                    msg = "Invalid username or password";
+                } else if (status === 403) {
+                    msg = "You don’t have permission to sign in here";
+                } else if (err?.name === "AbortError") {
+                    msg = "Login request timed out. Please try again.";
+                } else if (err?.message === "Failed to fetch") {
+                    msg = "Network error. Please check your connection.";
+                } else {
+                    msg =
+                        err?.payload?.message ||
+                        err?.message ||
+                        "Login failed. Please try again.";
+                }
+                showToast(msg, "error");
+            } finally {
+                setAuthSubmitting(false);
             }
-
-            window.location.replace("/");
-        } catch (err) {
-            showToast("Network error, please try again", "error");
-        }
-    }, []);
-
-
+        },
+        [showToast]
+    );
 
 
     // 3) Guest login
@@ -109,12 +149,14 @@ export default function JoinPage() {
             const payload = { uuid, displayName: clean };
             try {
                 localStorage.setItem("guestIdentity", JSON.stringify({ ...payload, source: "guest" }));
-            } catch { /* empty */ }
+            } catch {
+                /* empty */
+            }
 
             try {
                 const saved = await api.guestAuth(payload); // expects { uuid, displayName }
                 setMe(saved || { ...payload, source: "guest" });
-                showToast(`Welcome, ${(saved?.displayName || clean)}!`);
+                showToast(`Welcome, ${saved?.displayName || clean}!`);
             } catch (e) {
                 showToast(e?.message || "Guest login failed", "error");
             }
@@ -126,10 +168,16 @@ export default function JoinPage() {
     const handleLogout = useCallback(async () => {
         try {
             await api.logout?.();
-        } catch { /* empty */ }
+        } catch {
+            /* empty */
+        }
         try {
             localStorage.removeItem("guestIdentity");
-        } catch { /* empty */ }
+            localStorage.removeItem("accessToken");
+            localStorage.removeItem("authIdentity");
+        } catch {
+            /* empty */
+        }
         setMe(null);
         showToast("Signed out");
     }, [showToast]);
@@ -142,9 +190,10 @@ export default function JoinPage() {
                     authTried={authTried}
                     onLogin={handleLogin}
                     onGuestLogin={handleGuestLogin}
-                    loading={false}   // no match loading
-                    match={null}      // match features not used
+                    loading={false}    // no match loading here
+                    match={null}
                     onLogout={handleLogout}
+                    loginSubmitting={authSubmitting} // <- pass down so your form can disable the button/spinner
                 />
                 {me && <InviteBar />}
             </div>
