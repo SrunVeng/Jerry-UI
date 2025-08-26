@@ -1,144 +1,138 @@
 // src/api/client/real.js
-const BASE_URL = import.meta.env.VITE_API_BASE || "http://localhost:8080/api";
 
+// Example .env:
+// VITE_API_BASE=http://localhost:8080/api
+const BASE_URL = (import.meta.env.VITE_API_BASE || "http://localhost:8080/api").replace(/\/+$/, "");
+
+// Toggle only if your backend uses cookie sessions.
+// If you use JWT in JSON + localStorage, leave false.
+const USE_COOKIES = false;
+
+/* ---------------- internal helpers ---------------- */
+
+function fullUrl(path) {
+    // ensure exactly one slash between base and path
+    const p = path.startsWith("/") ? path : `/${path}`;
+    return `${BASE_URL}${p}`;
+}
+
+/** Build a direct Telegram login URL on the backend with a redirect (default "/"). */
+
+
+/** Unified fetch wrapper: timeout, (optional) cookies, JSON/text handling, better errors */
 async function request(path, options = {}) {
-    const res = await fetch(`${BASE_URL}${path}`, {
-        credentials: "include", // allow cookies/session
-        headers: {
-            "Content-Type": "application/json",
-            ...(options.headers || {}),
-        },
-        ...options,
-    });
-    if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || res.statusText);
+    const {
+        method = "GET",
+        body,
+        headers = {},
+        credentials = USE_COOKIES ? "include" : "omit",
+        timeout = 15000,
+    } = options;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    try {
+        const init = {
+            method,
+            credentials,
+            mode: "cors",
+            headers: { ...headers },
+            signal: controller.signal,
+        };
+
+        if (body !== undefined) {
+            if (typeof body === "string") {
+                init.body = body;
+                init.headers["Content-Type"] ||= "application/json";
+            } else {
+                init.body = JSON.stringify(body);
+                init.headers["Content-Type"] ||= "application/json";
+            }
+        }
+
+        const res = await fetch(fullUrl(path), init);
+
+        const contentType = res.headers.get("content-type") || "";
+        const isJson = contentType.includes("application/json");
+        const payload = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
+
+        if (!res.ok) {
+            const msg =
+                (isJson && payload && (payload.message || payload.error || payload.error_code)) ||
+                (typeof payload === "string" && payload) ||
+                `${res.status} ${res.statusText}`;
+            throw new Error(msg);
+        }
+
+        if (res.status === 204) return null;
+        return payload;
+    } finally {
+        clearTimeout(timer);
     }
-    return res.status === 204 ? null : res.json();
 }
 
-function currentOrigin() {
-    if (typeof window === "undefined") return "";
-    return window.location.origin || "";
-}
-
-function currentJoinUrl(matchId) {
-    const origin = currentOrigin();
-    return `${origin}/join?mid=${encodeURIComponent(matchId)}`;
-}
+/* ---------------- public api ---------------- */
 
 export const api = {
-    // ----- Auth -----
-    async me() {
+    /* ----- Auth ----- */
+
+    // GET /api/auth/me
+    me() {
         return request("/auth/me");
     },
 
-    async guestAuth(guest) {
-        return request("/auth/guest", {
+    // POST /api/auth/guest/login  (expects { uuid, displayName })
+    guestAuth(guest) {
+        return request("/api/auth/guest/login", {
             method: "POST",
-            body: JSON.stringify(guest),
+            body: { uuid: guest.uuid, displayName: guest.displayName },
         });
     },
 
-    async logout() {
+    // POST /api/auth/logout
+    logout() {
         return request("/auth/logout", { method: "POST" });
     },
 
-    telegramLoginUrl(matchId) {
-        // Prefer server-driven redirect, but include a return URL for a smooth bounce-back
-        const url = new URL(`${BASE_URL}/auth/telegram/login`);
-        if (matchId) url.searchParams.set("mid", matchId);
-        if (typeof window !== "undefined") {
-            url.searchParams.set("redirect", currentJoinUrl(matchId || "demo-123"));
-        }
-        return url.toString();
+    /* ----- Telegram ----- */
+
+    // POST /api/auth/telegram/login (snake_case fields from Telegram)
+    LoginAuth(payload) {
+        return request("/api/auth/user/login", {
+            method: "POST",
+            body: payload,
+        });
     },
 
     /**
-     * Finalize Telegram login if Telegram (or your backend) sent the
-     * signed payload back to this page via query params:
-     *   id, hash, auth_date, first_name, last_name, username, photo_url
-     * If present, we POST it to /auth/telegram, set the server session cookie,
-     * then clean the URL (keep only ?mid=...).
-     *
-     * Returns the server response (e.g., { token, user } or just user/session),
-     * or null if no Telegram params were found.
+     * If Telegram redirects back with ?id=&hash=&auth_date=...
+     * Call once on landing page to finalize; it POSTs to /auth/telegram/login.
      */
     async telegramFinalizeFromLocation() {
         if (typeof window === "undefined") return null;
 
         const sp = new URLSearchParams(window.location.search);
-        const hasCore =
-            sp.has("id") && sp.has("hash") && sp.has("auth_date");
-
+        const hasCore = sp.has("id") && sp.has("hash") && sp.has("auth_date");
         if (!hasCore) return null;
 
         const payload = {};
-        ["id", "hash", "auth_date", "first_name", "last_name", "username", "photo_url"]
-            .forEach((k) => {
-                if (sp.has(k)) payload[k] = sp.get(k);
-            });
-
-        // Send payload to server to verify + create session
-        const result = await request("/auth/telegram", {
-            method: "POST",
-            body: JSON.stringify(payload),
+        ["id", "hash", "auth_date", "first_name", "last_name", "username", "photo_url"].forEach((k) => {
+            if (sp.has(k)) payload[k] = sp.get(k);
         });
 
-        // Clean sensitive params from the URL; keep ?mid=... if present
-        const mid = sp.get("mid");
-        const clean = `${window.location.pathname}${mid ? `?mid=${encodeURIComponent(mid)}` : ""}`;
+        const result = await request("/auth/telegram/login", {
+            method: "POST",
+            body: payload,
+        });
+
+        // Clean the URL completely (no match params anymore)
+        const clean = `${window.location.pathname}`;
         window.history.replaceState({}, "", clean);
 
         return result;
     },
 
-    // ----- Matches -----
-    async listMatches() {
-        return request("/matches");
-    },
+    // Build backend login URL for redirect flow (defaults to "/")
 
-    async getMatch(id) {
-        return request(`/matches/${id}`);
-    },
-
-    async createMatch(data) {
-        return request("/matches", {
-            method: "POST",
-            body: JSON.stringify(data),
-        });
-    },
-
-    async updateMatch(id, patch) {
-        return request(`/matches/${id}`, {
-            method: "PATCH",
-            body: JSON.stringify(patch),
-        });
-    },
-
-    async deleteMatch(id) {
-        return request(`/matches/${id}`, { method: "DELETE" });
-    },
-
-    shareUrl(matchId) {
-        const base =
-            (typeof window !== "undefined" &&
-                window.location &&
-                window.location.origin) ||
-            "";
-        return `${base}/join?mid=${encodeURIComponent(matchId)}`;
-    },
-
-    // ----- Attendance -----
-    async join(matchId) {
-        return request(`/matches/${matchId}/join`, { method: "POST" });
-    },
-
-    async leave(matchId) {
-        return request(`/matches/${matchId}/leave`, { method: "POST" });
-    },
-
-    async kick(matchId, playerId) {
-        return request(`/matches/${matchId}/kick/${playerId}`, { method: "POST" });
-    },
 };

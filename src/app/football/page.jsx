@@ -5,7 +5,7 @@ import MatchForm from "../../components/MatchForm.jsx";
 import MatchCard from "../../components/MatchCard.jsx";
 import { loadMatches, saveMatches, uid } from "../../lib/match";
 
-export default function FootballSignupApp() {
+export default function UserPage() {
     const [myName, setMyName] = useState("");
     const [matches, setMatches] = useState([]);
     const [form, setForm] = useState({
