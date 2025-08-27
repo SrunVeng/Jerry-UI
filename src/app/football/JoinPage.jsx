@@ -60,7 +60,7 @@ export default function JoinPage() {
                 // persist lightweight identity (optional)
                 try {
                     localStorage.setItem("authIdentity", JSON.stringify({ username }));
-                } catch {}
+                } catch { /* empty */ }
 
                 const resp = await api.LoginAuth({ username, password });
 
@@ -85,12 +85,12 @@ export default function JoinPage() {
                 try {
                     localStorage.setItem("accessToken", token);
                     if (refresh) localStorage.setItem("refreshToken", refresh);
-                } catch {}
+                } catch { /* empty */ }
 
                 try {
                     const user = await api.me();
                     setMe(user || null);
-                } catch {}
+                } catch { /* empty */ }
 
                 window.location.replace("/");
             } catch (err) {
@@ -117,7 +117,7 @@ export default function JoinPage() {
 
     // 3) Guest login (disabled)
     const handleGuestLogin = useCallback(
-        async (_name) => {
+        async () => {
             showToast("Continue as guest — coming soon ✨", "info");
             // intentionally no API call, no localStorage, no navigation
         },
@@ -126,13 +126,13 @@ export default function JoinPage() {
 
     // 4) Logout
     const handleLogout = useCallback(async () => {
-        try { await api.logout?.(); } catch {}
+        try { await api.logout?.(); } catch { /* empty */ }
         try {
             localStorage.removeItem("guestIdentity"); // in case legacy guest existed
             localStorage.removeItem("accessToken");
             localStorage.removeItem("refreshToken");
             localStorage.removeItem("authIdentity");
-        } catch {}
+        } catch { /* empty */ }
         setMe(null);
         showToast("Signed out");
     }, [showToast]);

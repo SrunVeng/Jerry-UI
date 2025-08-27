@@ -430,7 +430,7 @@ export default function Page() {
     }
 
     async function handleLogout() {
-        try { await api.logout(); } catch {}
+        try { await api.logout(); } catch { /* empty */ }
     }
 
     /* ==================== Admin Panel: Users ==================== */
