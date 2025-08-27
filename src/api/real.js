@@ -1,18 +1,15 @@
-// src/api/client/real.js
+// Example .env for Next.js:
+// NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
 
-// Example .env:
-// VITE_API_BASE=http://localhost:8080/api
-const BASE_URL = (import.meta.env.VITE_API_BASE || "http://localhost:8080/api").replace(/\/+$/, "");
+const BASE_URL = (
+    (typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_API_BASE_URL) ||
+    "http://localhost:8080/api"
+).replace(/\/+$/, "");
 
-// Set true only if your backend uses cookie sessions (HTTP-only cookies).
-// If you use JWT via Authorization header (recommended), keep false.
-const USE_COOKIES = false;
+const USE_COOKIES = false; // set true only if your backend uses cookie sessions
+const LOGIN_PATH = "/auth"; // where to send users to re-auth
 
-// Where to send users when they need to re-auth
-const LOGIN_PATH = "/auth"; // change if your login route differs
-
-/* ---------------- internal helpers ---------------- */
-
+/* ---------------- helpers ---------------- */
 function fullUrl(path) {
     const p = path.startsWith("/") ? path : `/${path}`;
     return `${BASE_URL}${p}`;
@@ -20,13 +17,10 @@ function fullUrl(path) {
 
 function getToken() {
     try {
-        // prefer lowercase (new)
         let raw = localStorage.getItem("accessToken");
         if (raw) return String(raw).replace(/^"|"$/g, "");
-        // legacy fallback
         raw = localStorage.getItem("AccessToken");
         if (raw) return String(raw).replace(/^"|"$/g, "");
-        // optional fallback if embedded somewhere else
         const auth = localStorage.getItem("authIdentity");
         if (auth) {
             const obj = JSON.parse(auth);
@@ -44,29 +38,13 @@ function getRefreshToken() {
     return null;
 }
 
-function setAccessToken(tok) {
-    try {
-        if (tok) localStorage.setItem("accessToken", tok);
-    } catch {}
-}
-
-function setRefreshToken(tok) {
-    try {
-        if (tok) localStorage.setItem("refreshToken", tok);
-    } catch {}
-}
+function setAccessToken(tok) { try { if (tok) localStorage.setItem("accessToken", tok); } catch {} }
+function setRefreshToken(tok) { try { if (tok) localStorage.setItem("refreshToken", tok); } catch {} }
 
 function setTokensFromLoginResponse(res) {
     try {
-        // very forgiving shape extraction
-        const at =
-            res?.accessToken ||
-            res?.token ||
-            res?.data?.accessToken ||
-            res?.data?.token;
-        const rt =
-            res?.refreshToken ||
-            res?.data?.refreshToken;
+        const at = res?.accessToken || res?.token || res?.data?.accessToken || res?.data?.token;
+        const rt = res?.refreshToken || res?.data?.refreshToken;
         if (at) setAccessToken(at);
         if (rt) setRefreshToken(rt);
     } catch {}
@@ -84,19 +62,17 @@ function clearAuth() {
 function redirectToLogin() {
     try {
         const here =
-            (typeof window !== "undefined" && window.location && window.location.pathname + window.location.search) ||
-            "/";
-        // avoid redirect-loop if already on login page
+            (typeof window !== "undefined" &&
+                window.location &&
+                window.location.pathname + window.location.search) || "/";
         if (typeof window !== "undefined" && !here.startsWith(LOGIN_PATH)) {
             const to = `${LOGIN_PATH}?next=${encodeURIComponent(here)}`;
             window.location.replace(to);
         }
-    } catch {
-        // swallow
-    }
+    } catch {}
 }
 
-// ---- core request with refresh-once ----
+/* --------------- core request (refresh-once) --------------- */
 async function request(path, options = {}) {
     const {
         method = "GET",
@@ -104,7 +80,7 @@ async function request(path, options = {}) {
         headers = {},
         credentials = USE_COOKIES ? "include" : "omit",
         timeout = 15000,
-        _retry // internal flag to avoid infinite loops
+        _retry
     } = options;
 
     const controller = new AbortController();
@@ -129,8 +105,7 @@ async function request(path, options = {}) {
                 init.body = body;
                 init.headers["Content-Type"] ||= "application/json";
             } else if (body instanceof FormData || body instanceof Blob) {
-                // let browser set multipart/form-data or blob content-type
-                init.body = body;
+                init.body = body; // browser sets content-type
             } else {
                 init.body = JSON.stringify(body);
                 init.headers["Content-Type"] ||= "application/json";
@@ -139,13 +114,14 @@ async function request(path, options = {}) {
 
         const res = await fetch(fullUrl(path), init);
 
-        const contentType = res.headers.get("content-type") || "";
-        const isJson = contentType.includes("application/json");
-        const payload = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
+        const contentType = (res.headers.get("content-type") || "").toLowerCase();
+        const isJson = contentType.includes("json");
+        const payload = isJson
+            ? await res.json().catch(() => null)
+            : await res.text().catch(() => "");
 
-        // ----- handle non-OK -----
         if (!res.ok) {
-            // 401 → try refresh once (if we have a refresh token)
+            // 401 → try refresh once
             if (res.status === 401 && !_retry) {
                 const rt = getRefreshToken();
                 if (rt) {
@@ -156,38 +132,23 @@ async function request(path, options = {}) {
                             credentials,
                             body: JSON.stringify({ refreshToken: rt }),
                         });
-
                         if (refreshRes.ok) {
-                            const refreshCT = refreshRes.headers.get("content-type") || "";
-                            const refreshJson = refreshCT.includes("application/json")
-                                ? await refreshRes.json().catch(() => null)
-                                : null;
+                            const ct = (refreshRes.headers.get("content-type") || "").toLowerCase();
+                            const j = ct.includes("json") ? await refreshRes.json().catch(() => null) : null;
 
                             const newAccess =
-                                refreshJson?.accessToken ||
-                                refreshJson?.token ||
-                                refreshJson?.data?.accessToken ||
-                                refreshJson?.data?.token;
-
-                            const newRefresh =
-                                refreshJson?.refreshToken ||
-                                refreshJson?.data?.refreshToken;
+                                j?.accessToken || j?.token || j?.data?.accessToken || j?.data?.token;
+                            const newRefresh = j?.refreshToken || j?.data?.refreshToken;
 
                             if (newAccess) {
                                 setAccessToken(newAccess);
                                 if (newRefresh) setRefreshToken(newRefresh);
-
-                                // retry original request with the new token
                                 const retryHeaders = { ...headers, Authorization: `Bearer ${newAccess}` };
                                 return await request(path, { ...options, headers: retryHeaders, _retry: true });
                             }
                         }
-                    } catch {
-                        // ignore and fall through
-                    }
+                    } catch {}
                 }
-
-                // refresh failed or no refresh available → clear and redirect to login
                 clearAuth();
                 redirectToLogin();
             }
@@ -196,120 +157,63 @@ async function request(path, options = {}) {
                 (isJson && payload && (payload.message || payload.error || payload.error_code)) ||
                 (typeof payload === "string" && payload) ||
                 `${res.status} ${res.statusText}`;
-
             const err = Object.assign(new Error(msg), { status: res.status, payload });
             throw err;
         }
 
         if (res.status === 204) return null;
-        return payload; // return as-is (you can unwrap .data in specific API methods if desired)
+        // ✅ success: only accept JSON as data; any non-JSON is treated as "no body"
+        if (!isJson) return null;
+
+        return payload;
     } finally {
         clearTimeout(timer);
     }
 }
 
-// Build absolute share URL using current origin
-function shareUrl(matchId) {
-    const base =
-        (typeof window !== "undefined" && window.location && window.location.origin) || "";
-    return `${base}/join?mid=${encodeURIComponent(matchId)}`;
-}
-
 /* ---------------- public api ---------------- */
-
 export const api = {
+    isAuthenticated() { return !!getToken(); },
+
     /* ----- Auth ----- */
-
     async me() {
-        try {
-            const me = await request("/auth/me", { method: "GET" });
-            return me || null;
-        } catch (e) {
-            if (e?.status === 404) return null;
-            throw e;
-        }
-    },
-
-    guestAuth(guest) {
-        return request("/auth/guest/login", {
-            method: "POST",
-            body: { uuid: guest.uuid, displayName: guest.displayName },
-        });
+        try { return await request("/auth/me", { method: "GET" }); }
+        catch (e) { if (e?.status === 404) return null; throw e; }
     },
 
     async logout() {
-        try {
-            await request("/auth/logout", { method: "POST" });
-        } finally {
-            clearAuth();
-            redirectToLogin();
-        }
+        try { await request("/auth/logout", { method: "POST" }); }
+        finally { clearAuth(); redirectToLogin(); }
     },
 
-    // username/password login
     async LoginAuth(payload) {
         const out = await request("/auth/user/login", { method: "POST", body: payload });
-        // persist tokens so subsequent calls include Authorization
         setTokensFromLoginResponse(out);
         return out;
     },
 
     /* ----- Matches ----- */
-    // If your backend prefers /match/create keep as-is; recommend moving to /football/matches for consistency.
-
-    listMatches() {
-        return request("/football/matches", { method: "GET" });
-    },
+    getMatchAll() { return request("/match/getAll", { method: "GET" }); },
 
     getMatch(id) {
-        return request(`/football/matches/${encodeURIComponent(id)}`, { method: "GET" });
+        return request(`/match/getMatchDetailsById/${encodeURIComponent(id)}`, { method: "GET" });
     },
 
-    getMatchAll() {
-        return request(`/match/getAll`, { method: "GET" });
-    },
-
-    // /match/create expects { opponentName, matchDate, time, location, numberPlayer, notes }
+    // ✅ create match (maps form to your backend shape)
     createMatch(data) {
-        return request("/match/create", {
-            method: "POST",
-            body: {
-                opponentName: data.opponentName,
-                matchDate: data.matchDate,
-                time: data.time,
-                location: data.location,
-                numberPlayer: data.numberPlayer,
-                notes: data.notes,
-            },
-        });
+        const body = {
+            opponentName: data.opponentName || data.title || "Jerry FC Match",
+            matchDate: data.matchDate || data.date,
+            time: data.time,
+            location: data.location,
+            numberPlayer: Number(data.numberPlayer ?? data.maxPlayers) || 12,
+            notes: data.notes,
+        };
+        return request("/match/create", { method: "POST", body });
     },
 
-    updateMatch(id, patch) {
-        // if your backend truly uses /match/create/:id, keep it; otherwise consider /football/matches/:id
-        return request(`/match/create/${encodeURIComponent(id)}`, {
-            method: "PATCH",
-            body: patch,
-        });
-    },
-
-    deleteMatch(id) {
-        return request(`/football/matches/${encodeURIComponent(id)}`, { method: "DELETE" });
-    },
-
+    // ✅ join — backend expects numeric Long id; UI will ensure numeric only
     join(id) {
-        return request(`/football/matches/${encodeURIComponent(id)}/join`, { method: "POST" });
+        return request(`/match/join/${encodeURIComponent(id)}`, { method: "POST" });
     },
-
-    leave(id) {
-        return request(`/football/matches/${encodeURIComponent(id)}/leave`, { method: "POST" });
-    },
-
-    kick(id, playerId) {
-        return request(
-            `/football/matches/${encodeURIComponent(id)}/kick/${encodeURIComponent(playerId)}`,
-            { method: "POST" },
-        );
-    },
-
-    shareUrl,
 };
