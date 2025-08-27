@@ -15,6 +15,35 @@ function fullUrl(path) {
     return `${BASE_URL}${p}`;
 }
 
+function toArray(x) {
+    if (Array.isArray(x)) return x;
+    if (x == null) return [];
+    return String(x).split(",").map(s => s.trim()).filter(Boolean);
+}
+
+function normalizeRoles(input) {
+    const raw = toArray(input);
+    if (raw.length === 0) return ["ROLE_USER"];
+    return raw.map(r => {
+        const u = String(r).toUpperCase();
+        if (u.startsWith("ROLE_")) return u;
+        if (u === "ADMIN") return "ROLE_ADMIN";
+        if (u === "USER")  return "ROLE_USER";
+        return `ROLE_${u}`;
+    });
+}
+
+function pickDefined(obj) {
+    const out = {};
+    for (const k of Object.keys(obj)) {
+        const v = obj[k];
+        if (v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "")) {
+            out[k] = v;
+        }
+    }
+    return out;
+}
+
 function getToken() {
     try {
         let raw = localStorage.getItem("accessToken");
@@ -162,7 +191,6 @@ async function request(path, options = {}) {
         }
 
         if (res.status === 204) return null;
-        // ✅ success: only accept JSON as data; any non-JSON is treated as "no body"
         if (!isJson) return null;
 
         return payload;
@@ -176,11 +204,6 @@ export const api = {
     isAuthenticated() { return !!getToken(); },
 
     /* ----- Auth ----- */
-    async me() {
-        try { return await request("/auth/me", { method: "GET" }); }
-        catch (e) { if (e?.status === 404) return null; throw e; }
-    },
-
     async logout() {
         try { await request("/auth/logout", { method: "POST" }); }
         finally { clearAuth(); redirectToLogin(); }
@@ -199,7 +222,6 @@ export const api = {
         return request(`/match/getMatchDetailsById/${encodeURIComponent(id)}`, { method: "GET" });
     },
 
-    // ✅ create match (maps form to your backend shape)
     createMatch(data) {
         const body = {
             opponentName: data.opponentName || data.title || "Jerry FC Match",
@@ -212,8 +234,73 @@ export const api = {
         return request("/match/create", { method: "POST", body });
     },
 
-    // ✅ join — backend expects numeric Long id; UI will ensure numeric only
+    createLocation(name) {
+        return request(`/match/location/create/${encodeURIComponent(name)}`, { method: "POST" });
+    },
+
+    getAllLocation() {
+        return request("/match/location/getAll", { method: "GET" });
+    },
+
+
+    deleteMatch(id) {
+        return request(`/match/delete/${encodeURIComponent(id)}`, { method: "POST" });
+    },
+
     join(id) {
         return request(`/match/join/${encodeURIComponent(id)}`, { method: "POST" });
     },
+    leave(id) {
+        return request(`/match/leave/${encodeURIComponent(id)}`, { method: "POST" });
+    },
+
+
+    // for Admin
+    createUser(data = {}) {
+        const body = pickDefined({
+            firstName: data.firstName,
+            lastName: data.lastName,
+            username: data.username,
+            password: data.password,          // server encodes
+            displayName: data.displayName,
+            roles: normalizeRoles(data.roles ?? data.role),
+            email: data.email,
+            phoneNumber: data.phoneNumber,
+            chatId: data.chatId,
+        });
+        return request("/auth/user/register", { method: "POST", body });
+    },
+
+    /** Get all users */
+    getAllUsers() {
+        return request("/auth/user/getAll", { method: "GET" });
+    },
+
+    /** Delete user by id (POST to path param) */
+    DeleteUser(id) {
+        return request(`/auth/user/delete/${encodeURIComponent(id)}`, { method: "POST" });
+    },
+
+    /**
+     * Update a user
+     * Required: id, firstName, lastName, username, password, displayName, roles
+     * Optional: email, phoneNumber, chatId
+     */
+    UpdateUser(data = {}) {
+        const body = pickDefined({
+            id: data.id,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            username: data.username,
+            password: data.password,          // server encodes
+            displayName: data.displayName,
+            roles: normalizeRoles(data.roles ?? data.role),
+            email: data.email,
+            phoneNumber: data.phoneNumber,
+            chatId: data.chatId,
+        });
+        return request("/auth/user/update", { method: "POST", body });
+    },
+
+
 };
