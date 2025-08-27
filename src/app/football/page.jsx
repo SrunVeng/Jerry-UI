@@ -148,14 +148,13 @@ function renderRoleCell(u) {
 }
 
 function toDropdownRole(u) {
-    // Normalize backend values to our dropdown values ("ROLE_ADMIN"/"ROLE_USER")
     let r = u?.role ?? u?.roles;
     r = Array.isArray(r) ? r[0] : r;
     const up = String(r || "").toUpperCase();
     if (up.startsWith("ROLE_")) return up;
-    if (up === "ADMIN") return "ROLE_ADMIN";
-    if (up === "USER") return "ROLE_USER";
-    return "ROLE_USER";
+    if (up === "ADMIN") return "ADMIN";
+    if (up === "USER") return "USER";
+    return "USER";
 }
 
 export default function Page() {
@@ -441,7 +440,7 @@ export default function Page() {
     const [cUsername, setCUsername] = useState("");
     const [cPassword, setCPassword] = useState("");
     const [cDisplayName, setCDisplayName] = useState("");
-    const [cRole, setCRole] = useState("ROLE_USER"); // dropdown
+    const [cRole, setCRole] = useState("USER"); // dropdown
     const [cEmail, setCEmail] = useState("");
     const [cPhone, setCPhone] = useState("");
     const [cChatId, setCChatId] = useState("");
@@ -730,8 +729,8 @@ export default function Page() {
                                     <div className="flex items-center gap-2">
                                         <label className="text-xs text-slate-300 min-w-[60px]">Role *</label>
                                         <select className="input !py-2" value={cRole} onChange={e=>setCRole(e.target.value)}>
-                                            <option value="ROLE_USER">USER</option>
-                                            <option value="ROLE_ADMIN">ADMIN</option>
+                                            <option value="USER">USER</option>
+                                            <option value="ADMIN">ADMIN</option>
                                         </select>
                                     </div>
 
@@ -764,8 +763,8 @@ export default function Page() {
                                     <div className="flex items-center gap-2">
                                         <label className="text-xs text-slate-300 min-w-[60px]">Role *</label>
                                         <select className="input !py-2" value={uRole} onChange={e=>setURole(e.target.value)}>
-                                            <option value="ROLE_USER">USER</option>
-                                            <option value="ROLE_ADMIN">ADMIN</option>
+                                            <option value="USER">USER</option>
+                                            <option value="ADMIN">ADMIN</option>
                                         </select>
                                     </div>
 

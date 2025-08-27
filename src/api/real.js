@@ -16,23 +16,16 @@ function fullUrl(path) {
     return `${BASE_URL}${p}`;
 }
 
-function toArray(x) {
-    if (Array.isArray(x)) return x;
-    if (x == null) return [];
-    return String(x).split(",").map(s => s.trim()).filter(Boolean);
+function normalizeRoleString(input) {
+    // accept "ADMIN", "ROLE_ADMIN", ["ROLE_ADMIN"], ["ADMIN"], "user", etc.
+    let r = input;
+    if (Array.isArray(r)) r = r[0];
+    r = String(r || "").trim().toUpperCase();
+    if (r.startsWith("ROLE_")) r = r.replace(/^ROLE_/, "");
+    return r === "ADMIN" ? "ADMIN" : "USER";
 }
 
-function normalizeRoles(input) {
-    const raw = toArray(input);
-    if (raw.length === 0) return ["ROLE_USER"];
-    return raw.map(r => {
-        const u = String(r).toUpperCase();
-        if (u.startsWith("ROLE_")) return u;
-        if (u === "ADMIN") return "ROLE_ADMIN";
-        if (u === "USER")  return "ROLE_USER";
-        return `ROLE_${u}`;
-    });
-}
+
 
 function pickDefined(obj) {
     const out = {};
@@ -266,15 +259,16 @@ export const api = {
             firstName: data.firstName,
             lastName: data.lastName,
             username: data.username,
-            password: data.password,          // server encodes
+            password: data.password,                // server encodes
             displayName: data.displayName,
-            roles: normalizeRoles(data.roles ?? data.role),
+            role: normalizeRoleString(data.role ?? data.roles), // <-- STRING
             email: data.email,
             phoneNumber: data.phoneNumber,
             chatId: data.chatId,
         });
         return request("/auth/user/register", { method: "POST", body });
     },
+
 
     /** Get all users */
     getAllUsers() {
@@ -297,9 +291,9 @@ export const api = {
             firstName: data.firstName,
             lastName: data.lastName,
             username: data.username,
-            password: data.password,          // server encodes
+            password: data.password,                // server encodes
             displayName: data.displayName,
-            roles: normalizeRoles(data.roles ?? data.role),
+            role: normalizeRoleString(data.role ?? data.roles), // <-- STRING
             email: data.email,
             phoneNumber: data.phoneNumber,
             chatId: data.chatId,
