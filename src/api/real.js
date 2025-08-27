@@ -254,6 +254,10 @@ export const api = {
         return request(`/match/leave/${encodeURIComponent(id)}`, { method: "POST" });
     },
 
+    guestAuth(data) {
+        return request("/auth/guest/login", { method: "POST", body: data });
+    },
+
 
     // for Admin
     createUser(data = {}) {

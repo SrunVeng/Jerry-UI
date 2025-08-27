@@ -2,7 +2,7 @@ import { useEffect } from "react";
 
 const BOT = import.meta.env.VITE_TELEGRAM_BOT;
 
-export default function TelegramWidget({ onAuth }) {
+export default function LoginWidget({ onAuth }) {
     useEffect(() => {
         if (!BOT) {
             console.error("VITE_TELEGRAM_BOT is missing");

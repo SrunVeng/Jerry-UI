@@ -22,6 +22,21 @@ const norm = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
 /* -------- auth (local) -------- */
 function getMeFromStorage() {
     try {
+        // Prefer guest identity if present
+        const guestRaw = localStorage.getItem("guestIdentity");
+        if (guestRaw) {
+            const g = JSON.parse(guestRaw);
+            const roles = ["ROLE_USER"]; // guests are never admins
+            return {
+                id: String(g?.uuid || ""),            // may be empty if not set
+                username: String(g?.username || ""),  // usually empty for guest
+                displayName: String(g?.displayName || "Guest"),
+                roles,
+                source: "guest",
+            };
+        }
+
+        // Otherwise use regular auth identity
         const raw = localStorage.getItem("authIdentity");
         if (!raw) return { id: "", username: "", displayName: "", roles: [] };
         const a = JSON.parse(raw);
@@ -37,6 +52,7 @@ function getMeFromStorage() {
             username: String(a?.username ?? a?.user?.username ?? ""),
             displayName: String(a?.displayName ?? a?.name ?? a?.user?.displayName ?? a?.user?.name ?? ""),
             roles: Array.isArray(roles) ? roles : String(roles || "").split(/\s+/).filter(Boolean),
+            source: "user",
         };
     } catch {
         return { id: "", username: "", displayName: "", roles: [] };
@@ -352,6 +368,12 @@ export default function Page() {
             if (e?.status === 409) {
                 await fetchMatches();
             } else {
+                // 👇 NEW: if not authorized, send to /join (preserve return URL)
+                if (e?.status === 401) {
+                    const next = encodeURIComponent(window.location.pathname + window.location.search);
+                    window.location.href = `/join?next=${next}`;
+                    return;
+                }
                 applyLocalMembership(matchId, "remove");
                 alert(prettyError(e, "Failed to join match"));
             }
@@ -359,6 +381,7 @@ export default function Page() {
             setPending((p) => { const n = { ...p }; delete n[matchId]; return n; });
         }
     }
+
 
     async function handleLeave(matchId) {
         if (!matchId || !/^\w+$/.test(String(matchId))) {
