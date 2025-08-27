@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import MatchForm from "../../components/MatchForm.jsx";
 import MatchCard from "../../components/MatchCard.jsx";
-import FootballLoader from "../../components/FootballLoader.jsx";
+import FootballLoader from "../../components/footballLoader.jsx";
 import { api } from "../../api/real.js";
 
 /* ---------------- utils ---------------- */
