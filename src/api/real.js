@@ -2,8 +2,9 @@
 // NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
 
 const BASE_URL = (
+    // eslint-disable-next-line no-undef
     (typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_API_BASE_URL) ||
-    "http://localhost:8080/api"
+    "https://jerry-server-2.onrender.com/api"
 ).replace(/\/+$/, "");
 
 const USE_COOKIES = false; // set true only if your backend uses cookie sessions
@@ -55,7 +56,7 @@ function getToken() {
             const obj = JSON.parse(auth);
             if (obj?.token) return String(obj.token);
         }
-    } catch {}
+    } catch { /* empty */ }
     return null;
 }
 
@@ -63,12 +64,12 @@ function getRefreshToken() {
     try {
         const raw = localStorage.getItem("refreshToken");
         if (raw) return String(raw).replace(/^"|"$/g, "");
-    } catch {}
+    } catch { /* empty */ }
     return null;
 }
 
-function setAccessToken(tok) { try { if (tok) localStorage.setItem("accessToken", tok); } catch {} }
-function setRefreshToken(tok) { try { if (tok) localStorage.setItem("refreshToken", tok); } catch {} }
+function setAccessToken(tok) { try { if (tok) localStorage.setItem("accessToken", tok); } catch { /* empty */ } }
+function setRefreshToken(tok) { try { if (tok) localStorage.setItem("refreshToken", tok); } catch { /* empty */ } }
 
 function setTokensFromLoginResponse(res) {
     try {
@@ -76,7 +77,7 @@ function setTokensFromLoginResponse(res) {
         const rt = res?.refreshToken || res?.data?.refreshToken;
         if (at) setAccessToken(at);
         if (rt) setRefreshToken(rt);
-    } catch {}
+    } catch { /* empty */ }
 }
 
 function clearAuth() {
@@ -85,7 +86,7 @@ function clearAuth() {
         localStorage.removeItem("AccessToken");
         localStorage.removeItem("refreshToken");
         localStorage.removeItem("authIdentity");
-    } catch {}
+    } catch { /* empty */ }
 }
 
 function redirectToLogin() {
@@ -98,7 +99,7 @@ function redirectToLogin() {
             const to = `${LOGIN_PATH}?next=${encodeURIComponent(here)}`;
             window.location.replace(to);
         }
-    } catch {}
+    } catch { /* empty */ }
 }
 
 /* --------------- core request (refresh-once) --------------- */
@@ -176,7 +177,7 @@ async function request(path, options = {}) {
                                 return await request(path, { ...options, headers: retryHeaders, _retry: true });
                             }
                         }
-                    } catch {}
+                    } catch { /* empty */ }
                 }
                 clearAuth();
                 redirectToLogin();
