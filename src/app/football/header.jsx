@@ -12,7 +12,7 @@ export default function Header() {
                         className="h-12 sm:h-14 w-auto object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]"
                     />
                     <span className="text-2xl sm:text-3xl font-extrabold tracking-wider text-yellow-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-    Jerry FC
+    Jerry FT
   </span>
                 </div>
 

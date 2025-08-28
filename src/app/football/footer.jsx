@@ -6,7 +6,9 @@ export default function Footer() {
             <div className="mx-auto max-w-screen-xl px-4 py-4 text-center">
                 <p className="text-xs text-slate-400">
                     © {new Date().getFullYear()}{" "}
-                    <span className="font-semibold text-yellow-400">Jerry FC</span> • Local Match Signup
+                    <span className="font-semibold text-yellow-400">Jerry FT</span>
+                    <span className="mx-1 text-slate-500">•</span>
+                    All rights reserved
                 </p>
             </div>
         </footer>
