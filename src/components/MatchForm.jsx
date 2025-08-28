@@ -20,6 +20,7 @@ export default function MatchForm({ form, setForm, onCreate }) {
         const location = (form.location || "").trim();
         const date = (form.date || "").trim();
         const time = (form.time || "").trim();
+        // pitchNumber is OPTIONAL → not required in canCreate
         return opponent && location && date && time && !submitting;
     }, [form, submitting]);
 
@@ -82,8 +83,8 @@ export default function MatchForm({ form, setForm, onCreate }) {
             try {
                 // FE uses: POST /match/location/create/{locationName}
                 await api.createLocation(v);
-                await fetchLocations();             // <-- refresh
-                setForm({ ...form, location: v });  // <-- select the new one
+                await fetchLocations(); // <-- refresh
+                setForm({ ...form, location: v }); // <-- select the new one
                 setNewLoc("");
             } catch (e) {
                 alert(e?.message || "Failed to add location");
@@ -100,6 +101,7 @@ export default function MatchForm({ form, setForm, onCreate }) {
 
         const payload = {
             opponentName: (form.opponent || "").trim(),
+            pitchNumber: (form.pitchNumber || "").toString().trim() || undefined, // <-- NEW (optional)
             matchDate: (form.date || "").trim(),
             time: (form.time || "").trim(),
             location: (form.location || "").trim(),
@@ -112,6 +114,7 @@ export default function MatchForm({ form, setForm, onCreate }) {
             await onCreate?.(payload);
             setForm({
                 opponent: "",
+                pitchNumber: "", // <-- reset
                 date: "",
                 time: "",
                 location: "",
@@ -158,6 +161,19 @@ export default function MatchForm({ form, setForm, onCreate }) {
                         disabled={submitting}
                     />
                     {showErr("opponent") && <p className="mt-1 text-xs text-red-300">Opponent is required.</p>}
+                </div>
+
+                {/* Pitch Number (optional) */}
+                <div>
+                    <label className="text-sm text-white font-medium">Pitch Number (optional)</label>
+                    <input
+                        className="mt-1 w-full rounded-xl bg-slate-900/60 border border-slate-700 px-3 py-2 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400/40"
+                        value={form.pitchNumber || ""}
+                        onChange={(e) => setForm({ ...form, pitchNumber: e.target.value })}
+                        placeholder="e.g. 3"
+                        disabled={submitting}
+                    />
+                    <p className="mt-1 text-[11px] text-slate-400">If there are multiple pitches at the venue.</p>
                 </div>
 
                 {/* Date / Time */}
@@ -306,7 +322,15 @@ export default function MatchForm({ form, setForm, onCreate }) {
                     <button
                         type="button"
                         onClick={() =>
-                            setForm({ opponent: "", date: "", time: "", location: "", maxPlayers: 12, notes: "" })
+                            setForm({
+                                opponent: "",
+                                pitchNumber: "", // <-- reset
+                                date: "",
+                                time: "",
+                                location: "",
+                                maxPlayers: 12,
+                                notes: "",
+                            })
                         }
                         className="px-4 py-3 rounded-2xl border border-slate-700 bg-slate-900/60 text-slate-100 hover:bg-slate-800 active:scale-[.99] transition"
                         title="Reset form"

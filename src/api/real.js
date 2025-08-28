@@ -4,7 +4,7 @@
 const BASE_URL = (
     // eslint-disable-next-line no-undef
     (typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_API_BASE_URL) ||
-    "https://jerry-server-2.onrender.com/api"
+    "http://localhost:8080/api"
 ).replace(/\/+$/, "");
 
 const USE_COOKIES = false; // set true only if your backend uses cookie sessions
@@ -219,6 +219,7 @@ export const api = {
     createMatch(data) {
         const body = {
             opponentName: data.opponentName || data.title || "Jerry FC Match",
+            pitchNumber: data.pitchNumber ?? data.pitch ?? "",     // <-- FIXED
             matchDate: data.matchDate || data.date,
             time: data.time,
             location: data.location,
@@ -228,6 +229,21 @@ export const api = {
         return request("/match/create", { method: "POST", body });
     },
 
+
+    updateMatch(data) {
+        const body = {
+            id: data.id,
+            opponentName: data.opponentName || data.title || "Jerry FC Match",
+            pitchNumber: data.pitchNumber ?? data.pitch ?? "",     // <-- FIXED
+            matchDate: data.matchDate || data.date,
+            time: data.time,
+            location: data.location,
+            numberPlayer: Number(data.numberPlayer ?? data.maxPlayers) || 12,
+            notes: data.notes,
+        };
+        return request("/match/update", { method: "PATCH", body });
+    },
+
     createLocation(name) {
         return request(`/match/location/create/${encodeURIComponent(name)}`, { method: "POST" });
     },
@@ -235,6 +251,8 @@ export const api = {
     getAllLocation() {
         return request("/match/location/getAll", { method: "GET" });
     },
+
+
 
 
     deleteMatch(id) {
