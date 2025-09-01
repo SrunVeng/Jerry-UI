@@ -89,7 +89,7 @@ function coerceMatch(serverItem) {
     const id = rawId != null ? String(rawId) : null;
 
     const opponent = serverItem.opponentName ?? serverItem.name ?? "";
-    const title = serverItem.title ?? (opponent ? `Jerry FC vs ${opponent}` : "Jerry FC Match");
+    const title = serverItem.title ?? (opponent ? `Jerry FT vs ${opponent}` : "Jerry FC Match");
 
     const date = serverItem.date ?? serverItem.matchDate ?? "";
     const time = serverItem.time ?? serverItem.kickoffTime ?? serverItem.kickOffTime ?? "";
@@ -186,19 +186,9 @@ export default function Page() {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState("");
     const [pending, setPending] = useState({});      // {[matchId]: true}
-    const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false);
 
     // membership flags per match
     const [joinedByMe, setJoinedByMe] = useState({}); // {[matchId]: boolean}
-
-    const [form, setForm] = useState({
-        opponent: "",
-        date: new Date().toISOString().slice(0, 10),
-        time: "18:00",
-        location: "",
-        maxPlayers: 12,
-        notes: "Bring water and wear turf shoes.",
-    });
 
     // Locations (for MatchForm)
     const [locations, setLocations] = useState([]);
@@ -332,19 +322,6 @@ export default function Page() {
         setJoinedByMe((prev) => ({ ...prev, [matchId]: action === "add" }));
     }
 
-    /* -------- match actions -------- */
-    async function createMatch(payloadFromForm) {
-        try {
-            setPending((p) => ({ ...p, __create__: true }));
-            await api.createMatch(payloadFromForm);
-            await fetchMatches();
-        } catch (e) {
-            alert(prettyError(e, "Failed to create match"));
-        } finally {
-            setPending((p) => { const n = { ...p }; delete n.__create__; return n; });
-        }
-    }
-
     async function handleJoin(matchId) {
         if (!matchId || !/^\w+$/.test(String(matchId))) {
             alert("This match has no server id yet. Save it first.");
@@ -423,16 +400,6 @@ export default function Page() {
         }
     }
 
-    async function handleLogout() {
-        try { await api.logout(); } catch { /* empty */ }
-    }
-
-    /* ==================== Admin Panel: Users ==================== */
-    const [users, setUsers] = useState([]);
-    const [usersLoading, setUsersLoading] = useState(false);
-    const [usersError, setUsersError] = useState("");
-    const [adminBusy, setAdminBusy] = useState(false);
-    const [adminMsg, setAdminMsg] = useState("");
 
     // Create fields (required + optional)
     const [cFirstName, setCFirstName] = useState("");
@@ -619,17 +586,6 @@ export default function Page() {
                             <span className="text-yellow-400 ml-2">{greetingName}</span>
                         </h1>
                     </div>
-
-                    {/* Only Logout here (no "Refresh") */}
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setConfirmLogoutOpen(true)}
-                            className="rounded-lg bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 text-sm font-semibold"
-                            title="Logout"
-                        >
-                            Logout
-                        </button>
-                    </div>
                 </div>
 
                 {!!loadError && (
@@ -644,166 +600,8 @@ export default function Page() {
                     </div>
                 )}
 
-                {/* ==================== Admin Panel ==================== */}
-                {isAdmin && (
-                    <div className="mb-10 space-y-6">
-                        <h2 className="text-xl font-bold text-white">Admin Panel</h2>
-
-                        {/* Users List */}
-                        <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-white font-semibold">All Users</h3>
-                                {usersLoading && <span className="text-xs text-slate-400">Loading…</span>}
-                            </div>
-
-                            {!!usersError && (
-                                <div className="mb-3 text-sm text-red-300">{usersError}</div>
-                            )}
-
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm text-slate-200">
-                                    <thead>
-                                    <tr className="text-left text-slate-400 border-b border-slate-700">
-                                        <th className="py-2 pr-3">ID</th>
-                                        <th className="py-2 pr-3">Username</th>
-                                        <th className="py-2 pr-3">Display</th>
-                                        <th className="py-2 pr-3">Email</th>
-                                        <th className="py-2 pr-3">Role</th>
-                                        <th className="py-2 pr-3">Actions</th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    {users.length === 0 ? (
-                                        <tr>
-                                            <td className="py-4 text-slate-400" colSpan={6}>No users.</td>
-                                        </tr>
-                                    ) : (
-                                        users.map(u => {
-                                            const id = u?.id ?? u?.userId ?? "";
-                                            return (
-                                                <tr key={`u-${id}`} className="border-b border-slate-800">
-                                                    <td className="py-2 pr-3">{id}</td>
-                                                    <td className="py-2 pr-3">{u?.username}</td>
-                                                    <td className="py-2 pr-3">{u?.displayName}</td>
-                                                    <td className="py-2 pr-3">{u?.email || "-"}</td>
-                                                    <td className="py-2 pr-3">{renderRoleCell(u)}</td>
-                                                    <td className="py-2 pr-3">
-                                                        <div className="flex gap-2">
-                                                            <button
-                                                                onClick={() => onSelectUser(u)}
-                                                                className="px-2 py-1 rounded-lg border border-slate-700 hover:bg-slate-800"
-                                                            >
-                                                                Select
-                                                            </button>
-                                                            <button
-                                                                onClick={() => onDeleteUser(id)}
-                                                                disabled={adminBusy}
-                                                                className="px-2 py-1 rounded-lg bg-red-600 text-white hover:bg-red-500 disabled:opacity-60"
-                                                            >
-                                                                Delete
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })
-                                    )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        {/* Create / Update forms */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {/* Create User */}
-                            <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-                                <h3 className="text-white font-semibold mb-2">Create User</h3>
-                                <div className="grid grid-cols-1 gap-2">
-                                    <input className="input" placeholder="First name *" value={cFirstName} onChange={e=>setCFirstName(e.target.value)} />
-                                    <input className="input" placeholder="Last name *" value={cLastName} onChange={e=>setCLastName(e.target.value)} />
-                                    <input className="input" placeholder="Username *" value={cUsername} onChange={e=>setCUsername(e.target.value)} />
-                                    <input className="input" placeholder="Password *" type="password" value={cPassword} onChange={e=>setCPassword(e.target.value)} />
-                                    <input className="input" placeholder="Display name *" value={cDisplayName} onChange={e=>setCDisplayName(e.target.value)} />
-
-                                    {/* Roles dropdown */}
-                                    <div className="flex items-center gap-2">
-                                        <label className="text-xs text-slate-300 min-w-[60px]">Role *</label>
-                                        <select className="input !py-2" value={cRole} onChange={e=>setCRole(e.target.value)}>
-                                            <option value="USER">USER</option>
-                                            <option value="ADMIN">ADMIN</option>
-                                        </select>
-                                    </div>
-
-                                    {/* Optional fields */}
-                                    <input className="input" placeholder="Email (optional)" value={cEmail} onChange={e=>setCEmail(e.target.value)} />
-                                    <input className="input" placeholder="Phone number (optional)" value={cPhone} onChange={e=>setCPhone(e.target.value)} />
-                                    <input className="input" placeholder="Chat ID (optional)" value={cChatId} onChange={e=>setCChatId(e.target.value)} />
-                                </div>
-                                <button
-                                    onClick={onCreateUser}
-                                    disabled={adminBusy}
-                                    className="mt-3 w-full rounded-xl bg-yellow-400 text-slate-900 font-semibold py-2 hover:bg-yellow-300 active:scale-[.99] transition disabled:opacity-60"
-                                >
-                                    {adminBusy ? "Working..." : "Create User"}
-                                </button>
-                            </div>
-
-                            {/* Update User */}
-                            <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-                                <h3 className="text-white font-semibold mb-2">Update User</h3>
-                                <div className="grid grid-cols-1 gap-2">
-                                    <input className="input" placeholder="User ID *" value={uId} onChange={e=>setUId(e.target.value)} />
-                                    <input className="input" placeholder="First name *" value={uFirstName} onChange={e=>setUFirstName(e.target.value)} />
-                                    <input className="input" placeholder="Last name *" value={uLastName} onChange={e=>setULastName(e.target.value)} />
-                                    <input className="input" placeholder="Username *" value={uUsername} onChange={e=>setUUsername(e.target.value)} />
-                                    <input className="input" placeholder="Password *" type="password" value={uPassword} onChange={e=>setUPassword(e.target.value)} />
-                                    <input className="input" placeholder="Display name *" value={uDisplayName} onChange={e=>setUDisplayName(e.target.value)} />
-
-                                    {/* Roles dropdown */}
-                                    <div className="flex items-center gap-2">
-                                        <label className="text-xs text-slate-300 min-w-[60px]">Role *</label>
-                                        <select className="input !py-2" value={uRole} onChange={e=>setURole(e.target.value)}>
-                                            <option value="USER">USER</option>
-                                            <option value="ADMIN">ADMIN</option>
-                                        </select>
-                                    </div>
-
-                                    {/* Optional fields */}
-                                    <input className="input" placeholder="Email (optional)" value={uEmail} onChange={e=>setUEmail(e.target.value)} />
-                                    <input className="input" placeholder="Phone number (optional)" value={uPhone} onChange={e=>setUPhone(e.target.value)} />
-                                    <input className="input" placeholder="Chat ID (optional)" value={uChatId} onChange={e=>setUChatId(e.target.value)} />
-                                </div>
-                                <button
-                                    onClick={onUpdateUser}
-                                    disabled={adminBusy}
-                                    className="mt-3 w-full rounded-xl bg-blue-500 text-white font-semibold py-2 hover:bg-blue-400 active:scale-[.99] transition disabled:opacity-60"
-                                >
-                                    {adminBusy ? "Working..." : "Update User"}
-                                </button>
-                            </div>
-                        </div>
-
-                        {adminMsg && (
-                            <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-3 text-slate-200">
-                                {adminMsg}
-                            </div>
-                        )}
-                    </div>
-                )}
 
                 {/* ==================== Main Content ==================== */}
-                <div className="mt-8 grid grid-cols-1 gap-6 md:gap-8 md:grid-cols-3">
-                    {/* Create Match */}
-                    <div className="md:col-span-1 w-full max-w-full">
-                        <MatchForm
-                            form={form}
-                            setForm={setForm}
-                            locations={locations}
-                            addLocation={addLocation}
-                            onCreate={createMatch}
-                        />
-                    </div>
-
                     {/* Match List */}
                     <div className="md:col-span-2 space-y-6 w-full max-w-full">
                         {matches.length === 0 ? (
@@ -845,37 +643,9 @@ export default function Page() {
                             ))
                         )}
                     </div>
-                </div>
+
             </div>
 
-            {/* Logout confirmation modal */}
-            {confirmLogoutOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-                    <div className="bg-slate-800 border border-slate-600 rounded-2xl shadow-xl p-6 w-[90%] max-w-sm">
-                        <h4 className="text-lg font-semibold text-white">Log out?</h4>
-                        <p className="text-sm text-slate-300 mt-1">
-                            You’ll be signed out of Jerry FC on this device.
-                        </p>
-
-                        <div className="mt-5 flex justify-end gap-3">
-                            <button
-                                onClick={() => setConfirmLogoutOpen(false)}
-                                className="px-4 py-2 rounded-xl bg-slate-700 text-slate-200 hover:bg-slate-600 transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={async () => {
-                                    try { await handleLogout(); } finally { setConfirmLogoutOpen(false); }
-                                }}
-                                className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition"
-                            >
-                                Logout
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* small css helpers for inputs */}
             <style jsx>{`
