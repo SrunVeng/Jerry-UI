@@ -8,6 +8,23 @@ import { PlusCircle, UserCog, LogOut, Menu, X } from "lucide-react";
 /* ---------------- tiny utils ---------------- */
 const norm = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
 
+/* ---------------- role helpers ---------------- */
+const toRoleSet = (rolesLike) => {
+    const arr = Array.isArray(rolesLike) ? rolesLike : String(rolesLike || "").split(/\s+/);
+    return new Set(arr.filter(Boolean).map((r) => String(r).toUpperCase()));
+};
+const hasAnyRole = (set, ...names) => {
+    const targets = names.map((n) => String(n).toUpperCase());
+    for (const t of targets) if (set.has(t)) return true;
+    return false;
+};
+const deriveIsGuest = ({ me, jwtRoles }) => {
+    const combined = toRoleSet([...(me?.roles || []), ...(jwtRoles || [])]);
+    if (me?.isGuest === true) return true;
+    if (hasAnyRole(combined, "GUEST", "ROLE_GUEST", "ANONYMOUS", "ROLE_ANONYMOUS")) return true;
+    return false;
+};
+
 function getMeFromStorage() {
     try {
         const raw = localStorage.getItem("authIdentity");
@@ -235,8 +252,8 @@ function CreateMatchSheet({ open, onClose, onDone, pushToast }) {
     }
 
     async function handleCreate() {
-        if (!draft.opponentName.trim()) { /* ... */ }
-        if (!draft.date) { /* ... */ }
+        if (!draft.opponentName.trim()) { /* could show inline validation */ }
+        if (!draft.date) { /* could show inline validation */ }
         setBusy(true);
         try {
             const res = await api.createMatch({
@@ -246,14 +263,13 @@ function CreateMatchSheet({ open, onClose, onDone, pushToast }) {
                 location: draft.location,
                 numberPlayer: draft.numberPlayer,
                 notes: draft.notes,
-                pitchNumber:
-                    String(draft.pitchNumber || "").trim() || undefined,
+                pitchNumber: String(draft.pitchNumber || "").trim() || undefined,
             });
 
-            const created = res?.data ?? res ?? null;  // capture created match
+            const created = res?.data ?? res ?? null;
             onDone?.(created);
 
-            // 🔔 Notify any page that cares (like /matches) to refresh
+            // notify pages that listen (e.g., /matches)
             if (typeof window !== "undefined") {
                 window.dispatchEvent(new CustomEvent("matches:refresh", { detail: created }));
             }
@@ -293,18 +309,15 @@ function CreateMatchSheet({ open, onClose, onDone, pushToast }) {
                         </Field>
                     </div>
 
-                    {/* 👇 Add this new row for Pitch Number (or move it wherever you prefer) */}
                     <div className="grid grid-cols-2 gap-3">
                         <Field label="Pitch Number">
                             <Input
                                 placeholder="e.g., 3"
                                 value={draft.pitchNumber}
-                                onChange={(e) =>
-                                    setDraft((d) => ({ ...d, pitchNumber: e.target.value }))
-                                }
+                                onChange={(e) => setDraft((d) => ({ ...d, pitchNumber: e.target.value }))}
                             />
                         </Field>
-                        <div /> {/* spacer to keep grid balanced */}
+                        <div />
                     </div>
 
                     {/* Location picker + add new */}
@@ -811,25 +824,30 @@ function AdminUsersSheet({ open, onClose, onDone, pushToast }) {
 export default function Header({ isAdmin, currentUser, onRefresh }) {
     // derive admin if prop not provided
     const [me, setMe] = useState({ id: "", username: "", displayName: "", roles: [], isGuest: false });
+
     useEffect(() => {
         setMe(getMeFromStorage());
         const onStorage = () => setMe(getMeFromStorage());
         window.addEventListener("storage", onStorage);
         return () => window.removeEventListener("storage", onStorage);
     }, []);
+
     const jwtRoles = useMemo(() => getRolesFromToken(), []);
-    const allRoles = useMemo(() => {
-        const s = new Set([...(me.roles || []), ...(jwtRoles || [])].map(String));
-        return Array.from(s);
-    }, [me.roles, jwtRoles]);
-    const derivedIsAdmin = useMemo(() => {
-        const R = allRoles.map((r) => r.toUpperCase());
-        return R.includes("ROLE_ADMIN") || R.includes("ADMIN");
-    }, [allRoles]);
+    const roleSet = useMemo(() => toRoleSet([...(me.roles || []), ...(jwtRoles || [])]), [me.roles, jwtRoles]);
+
+    const derivedIsAdmin = useMemo(() => hasAnyRole(roleSet, "ADMIN", "ROLE_ADMIN"), [roleSet]);
     const effectiveIsAdmin = Boolean(isAdmin ?? derivedIsAdmin);
 
-    const hasJwt = Boolean(typeof window !== "undefined" && localStorage.getItem("accessToken"));
-    const isGuest = me.isGuest || (me.roles || []).includes("GUEST");
+    const hasJwt = typeof window !== "undefined" && !!localStorage.getItem("accessToken");
+    const hasIdentity =
+        typeof window !== "undefined" && !!localStorage.getItem("authIdentity");
+    const hasSession = hasJwt || hasIdentity; // <-- new: any session (guest or user)
+    const isGuest = deriveIsGuest({ me, jwtRoles });
+
+    // who can create?
+    const showCreateMatch = hasJwt && !isGuest; // flip to: && effectiveIsAdmin if only admins can create
+    const showAdmin = hasJwt && effectiveIsAdmin;
+    const showLogout = hasSession; // <-- changed from hasJwt && !isGuest
 
     const user = currentUser || {
         id: me.id,
@@ -850,16 +868,22 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
     async function handleLogout() {
         try {
             await api.logout?.();
-        } catch {}
+        } catch {
+            // ignore
+        } finally {
+            try {
+                localStorage.removeItem("accessToken");
+                localStorage.removeItem("authIdentity");
+                setMe(getMeFromStorage());
+            } catch {}
+            setConfirmLogoutOpen(false);
+            pushToast({ type: "info", title: "Signed out", message: "You have been logged out." });
+        }
     }
+
 
     // IMPORTANT: forward created entity to parent page so it can insert or refetch
     const handleRefresh = (created) => onRefresh?.(created);
-
-    // visibility rules
-    const showCreateMatch = hasJwt && !isGuest;
-    const showAdmin = hasJwt && effectiveIsAdmin;
-    const showLogout = hasJwt && !isGuest;
 
     return (
         <>
@@ -881,9 +905,19 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                     <div className="hidden sm:flex items-center gap-2">
                         {showCreateMatch && (
                             <button
-                                onClick={() => setOpenCreate(true)}
-                                className="rounded-lg bg-yellow-400 hover:bg-yellow-300 text-slate-900 px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5"
-                                title="Create Match"
+                                onClick={() => {
+                                    if (isGuest) {
+                                        pushToast({ type: "info", title: "Guest mode", message: "Sign in to create matches." });
+                                        return;
+                                    }
+                                    setOpenCreate(true);
+                                }}
+                                disabled={isGuest}
+                                className={`rounded-lg px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5
+                  ${isGuest
+                                    ? "bg-slate-700/60 text-slate-300 cursor-not-allowed"
+                                    : "bg-yellow-400 hover:bg-yellow-300 text-slate-900"}`}
+                                title={isGuest ? "Guests cannot create matches" : "Create Match"}
                             >
                                 <PlusCircle className="h-4 w-4" />
                                 Create Match
@@ -940,10 +974,17 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                         {showCreateMatch && (
                             <button
                                 onClick={() => {
+                                    if (isGuest) {
+                                        pushToast({ type: "info", title: "Guest mode", message: "Sign in to create matches." });
+                                        return;
+                                    }
                                     setOpenMobileMenu(false);
                                     setOpenCreate(true);
                                 }}
-                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-slate-100 flex items-center gap-2"
+                                disabled={isGuest}
+                                className={`w-full text-left px-4 py-3 flex items-center gap-2
+                  ${isGuest ? "text-slate-400 cursor-not-allowed" : "hover:bg-slate-800 text-slate-100"}`}
+                                title={isGuest ? "Guests cannot create matches" : "Create Match"}
                             >
                                 <PlusCircle className="h-5 w-5" />
                                 <span>Create Match</span>
@@ -1006,7 +1047,10 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                             >
                                 Cancel
                             </button>
-                            <button onClick={handleLogout} className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition flex items-center gap-1.5">
+                            <button
+                                onClick={handleLogout}
+                                className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition flex items-center gap-1.5"
+                            >
                                 <LogOut className="h-4 w-4" />
                                 Logout
                             </button>

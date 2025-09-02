@@ -150,7 +150,7 @@ async function request(path, options = {}) {
                 const rt = getRefreshToken();
                 if (rt) {
                     try {
-                        const refreshRes = await fetch(fullUrl("/auth/refresh"), {
+                        const refreshRes = await fetch(fullUrl("/auth/user/login/refresh-token"), {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             credentials,
@@ -290,7 +290,11 @@ export const api = {
     },
 
     guestAuth(data) {
-        return request("/auth/guest/login", { method: "POST", body: data });
+        return request("/auth/guest/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+        });
     },
 
 

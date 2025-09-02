@@ -116,13 +116,83 @@ export default function JoinPage() {
     );
 
     // 3) Guest login (disabled)
-    const handleGuestLogin = useCallback(
-        async () => {
-            showToast("Continue as guest — coming soon ✨", "info");
-            // intentionally no API call, no localStorage, no navigation
-        },
-        [showToast]
-    );
+    const handleGuestLogin = useCallback(async (maybeName) => {
+        // 1) Ask/validate name
+        const displayName = String(maybeName ?? prompt("Enter a display name") ?? "").trim();
+        if (!displayName) {
+            showToast("Please enter a display name", "error");
+            return;
+        }
+
+        // Simple helper for extracting fields safely
+        const pick = (obj, ...keys) =>
+            keys.reduce((acc, k) => (obj && obj[k] != null ? obj[k] : acc), undefined);
+
+        setAuthSubmitting(true);
+        try {
+            // 2) Call API
+            const resp = await api.guestAuth({ displayName });
+
+            // Normalize possible response shapes
+            const data = resp?.data ?? resp ?? {};
+            const accessToken =
+                pick(resp, "accessToken", "token") ??
+                pick(data, "accessToken", "token");
+
+            const guestId =
+                pick(resp, "guestId") ??
+                pick(data, "guestId") ??
+                null;
+
+            // 3) Persist session
+            try {
+                if (accessToken) {
+                    localStorage.setItem("accessToken", accessToken);
+                }
+
+                // Minimal identity for UI; roles include guest variants for safety
+                const identity = {
+                    displayName,
+                    isGuest: true,
+                    roles: ["ROLE_GUEST", "GUEST"],
+                    guestId,
+                };
+                localStorage.setItem("authIdentity", JSON.stringify(identity));
+                localStorage.setItem("guestIdentity", JSON.stringify(identity));
+            } catch {
+                // best-effort; keep going even if storage fails
+            }
+
+            // 4) Optionally fetch /me (if backend supports for guests)
+            try {
+                if (typeof api.me === "function") {
+                    const user = await api.me();
+                    setMe(user || { displayName, isGuest: true, roles: ["ROLE_GUEST", "GUEST"] });
+                } else {
+                    setMe({ displayName, isGuest: true, roles: ["ROLE_GUEST", "GUEST"] });
+                }
+            } catch {
+                setMe({ displayName, isGuest: true, roles: ["ROLE_GUEST", "GUEST"] });
+            }
+
+            showToast(`Welcome ${displayName}`, "success");
+
+            // 5) Redirect (support ?next=…)
+            const params = new URLSearchParams(window.location.search);
+            const next = params.get("next");
+            const target = (next && /^\/[^\s]*$/.test(next)) ? next : "/"; // basic safety
+            window.location.replace(target);
+        } catch (e) {
+            const msg =
+                e?.response?.data?.message ||
+                e?.message ||
+                "Guest login failed";
+            showToast(msg, "error");
+        } finally {
+            setAuthSubmitting(false);
+        }
+    }, [showToast, setAuthSubmitting, setMe]);
+
 
     // 4) Logout
     const handleLogout = useCallback(async () => {

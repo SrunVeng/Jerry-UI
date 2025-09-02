@@ -2,7 +2,6 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import Header from "../football/header.jsx";
 import MatchCard from "../../components/MatchCard.jsx";
 import FootballLoader from "../../components/footballLoader.jsx";
 import { api } from "../../api/real.js";
@@ -119,48 +118,96 @@ function buildDateTime(match) {
 }
 
 /* -------- auth (local) -------- */
+function getJwtPayload() {
+    try {
+        const tok = localStorage.getItem("accessToken");
+        return safeDecodeJwt(tok);
+    } catch {
+        return null;
+    }
+}
+
 function getMeFromStorage() {
     try {
         const raw = localStorage.getItem("authIdentity");
-        if (!raw) return { id: "", username: "", displayName: "", roles: [] };
-        const a = JSON.parse(raw);
-        const roles =
-            a?.roles ??
-            a?.authorities ??
-            a?.scopes ??
-            a?.user?.roles ??
-            a?.user?.authorities ??
-            [];
-        return {
-            id: String(a?.id ?? a?.userId ?? a?.user?.id ?? ""),
-            username: String(a?.username ?? a?.user?.username ?? ""),
-            displayName: String(
-                a?.displayName ?? a?.name ?? a?.user?.displayName ?? a?.user?.name ?? ""
-            ),
-            roles: Array.isArray(roles)
-                ? roles
-                : String(roles || "").split(/\s+/).filter(Boolean),
-            source: "user",
-        };
+        let base = { id: "", username: "", displayName: "", roles: [], isGuest: false };
+
+        if (raw) {
+            const a = JSON.parse(raw);
+            const roles =
+                a?.roles ??
+                a?.authorities ??
+                a?.scopes ??
+                a?.user?.roles ??
+                a?.user?.authorities ??
+                [];
+            base = {
+                id: String(a?.id ?? a?.userId ?? a?.user?.id ?? ""),
+                username: String(a?.username ?? a?.user?.username ?? ""),
+                displayName: String(
+                    a?.displayName ??
+                    a?.name ??
+                    a?.user?.displayName ??
+                    a?.user?.name ??
+                    ""
+                ),
+                roles: Array.isArray(roles)
+                    ? roles
+                    : String(roles || "").split(/\s+/).filter(Boolean),
+                isGuest: !!a?.isGuest,
+                source: "user",
+            };
+        }
+
+
+
+        // Enhance from token (for guests we carry displayName + subject)
+        const jwt = getJwtPayload();
+        if (jwt) {
+            const scopes = jwt.scope || jwt.scopes || jwt.roles || [];
+            const roles = Array.isArray(scopes)
+                ? scopes
+                : String(scopes || "").split(/\s+/);
+            const isGuest = !!jwt.guest || roles.includes("ROLE_GUEST");
+            const displayName = base.displayName || jwt.displayName || "";
+            return {
+                ...base,
+                isGuest,
+                displayName,
+                jwtSubject: jwt.sub || "",
+            };
+        }
+        return base;
     } catch {
-        return { id: "", username: "", displayName: "", roles: [] };
+        return { id: "", username: "", displayName: "", roles: [], isGuest: false };
     }
 }
+function safeDecodeJwt(token) {
+    try {
+        if (!token || typeof token !== "string") return null;
+        const parts = token.split(".");
+        if (parts.length < 2) return null;
+        const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const json = atob(base64);
+        return JSON.parse(json);
+    } catch {
+        return null;
+    }
+}
+
 function getRolesFromToken() {
     try {
         const token = localStorage.getItem("accessToken");
-        if (!token) return [];
-        const [, payloadB64] = token.split(".");
-        if (!payloadB64) return [];
-        const json = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+        const jwt = safeDecodeJwt(token);
+        if (!jwt) return [];
         const scopes =
-            json?.scope ||
-            json?.scopes ||
-            json?.authorities ||
-            json?.roles ||
-            json?.authorities_claim ||
+            jwt.scope ||
+            jwt.scopes ||
+            jwt.authorities ||
+            jwt.roles ||
+            jwt.authorities_claim ||
             [];
-        let arr = Array.isArray(scopes) ? scopes : String(scopes || "").split(/\s+/);
+        const arr = Array.isArray(scopes) ? scopes : String(scopes || "").split(/\s+/);
         return arr.filter(Boolean);
     } catch {
         return [];
@@ -205,10 +252,19 @@ function coerceMatch(serverItem) {
         } else {
             players = playersRaw.map((p, i) => {
                 const u = p?.user || p || {};
-                const pid = u?.id ?? p?.userId ?? p?.id ?? `tmp-${i + 1}`;
+                // If guest, prefer guestId as stable primary key
+                const pid = p?.guestId ?? u?.id ?? p?.userId ?? p?.id ?? `tmp-${i + 1}`;
                 const username = String(u?.username ?? p?.username ?? "");
-                const name = String(u?.displayName ?? u?.name ?? p?.name ?? username ?? u.username);
-                return { id: String(pid), name, username, status: p?.status };
+                const name = String(
+                    u?.displayName ??
+                    u?.name ??
+                    p?.guestDisplayName ??
+                    p?.name ??
+                    username ??
+                    u?.username ??
+                    "Player"
+                );
+                return { id: String(pid), name, username, status: p?.status, isGuest: !!p?.guestId };
             });
         }
     }
@@ -250,9 +306,17 @@ function coerceMatch(serverItem) {
 
 export default function Page() {
     /* -------- me/session -------- */
-    const [{ id: myId, username: myUsername, displayName: myName, roles: storedRoles }, setMe] = useState({
-        id: "", username: "", displayName: "", roles: []
+    const [{
+        id: myId,
+        username: myUsername,
+        displayName: myName,
+        roles: storedRoles,
+        isGuest,
+        jwtSubject
+    }, setMe] = useState({
+        id: "", username: "", displayName: "", roles: [], isGuest: false, jwtSubject: ""
     });
+
     useEffect(() => { setMe(getMeFromStorage()); }, []);
     const jwtRoles = useMemo(() => getRolesFromToken(), []);
     const allRoles = useMemo(() => {
@@ -261,6 +325,7 @@ export default function Page() {
     }, [storedRoles, jwtRoles]);
 
     const currentUserId = useMemo(() => (myId ? String(myId) : ""), [myId]);
+    const effectiveUserId = isGuest ? (jwtSubject || "") : currentUserId; // guests use subject ("guest:<uuid>")
     const greetingName = myName || myUsername || "Player";
 
     /* -------- matches & ui -------- */
@@ -271,7 +336,7 @@ export default function Page() {
 
     const [joinedByMe, setJoinedByMe] = useState({}); // {[matchId]: boolean}
 
-    // Locations (for MatchCard / edit modal)
+    // Locations (for MatchCard / edit modal) — NOT used by guests
     const [locations, setLocations] = useState([]);
     const [locError, setLocError] = useState("");
 
@@ -321,10 +386,10 @@ export default function Page() {
             const idMap = {};
             const myBestName = norm(myName || myUsername);
             for (const m of mapped) {
-                const hasMeById = currentUserId && m.players.some((p) => String(p.id) === String(currentUserId));
+                const hasMeByEffectiveId = effectiveUserId && m.players.some((p) => String(p.id) === String(effectiveUserId));
                 const hasMeByUsername = myUsername && m.players.some((p) => norm(p.username) === norm(myUsername));
                 const hasMeByName = myBestName && m.players.some((p) => norm(p.name) === myBestName);
-                if (hasMeById || hasMeByUsername || hasMeByName) idMap[m.id] = true;
+                if (hasMeByEffectiveId || hasMeByUsername || hasMeByName) idMap[m.id] = true;
             }
             setJoinedByMe((prev) => ({ ...prev, ...idMap }));
         } catch (e) {
@@ -332,10 +397,13 @@ export default function Page() {
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, myUsername, myName]);
+    }, [effectiveUserId, myUsername, myName]);
 
     useEffect(() => { fetchMatches(); }, [fetchMatches]);
-    useEffect(() => { fetchLocations(); }, [fetchLocations]);
+    useEffect(() => {
+        // Guests do not need locations (they can't edit)
+        if (!isGuest) fetchLocations();
+    }, [fetchLocations, isGuest]);
 
     /* -------- helpers -------- */
     const isJoined = useCallback(
@@ -343,14 +411,15 @@ export default function Page() {
             if (!m) return false;
             if (m.id && joinedByMe[m.id] != null) return !!joinedByMe[m.id];
             if (!Array.isArray(m.players)) return false;
+
             const myBestName = norm(myName || myUsername);
             return (
-                (currentUserId && m.players.some((p) => String(p.id) === String(currentUserId))) ||
+                (effectiveUserId && m.players.some((p) => String(p.id) === String(effectiveUserId))) ||
                 (myUsername && m.players.some((p) => norm(p.username) === norm(myUsername))) ||
                 (myBestName && m.players.some((p) => norm(p.name) === myBestName))
             );
         },
-        [joinedByMe, currentUserId, myUsername, myName]
+        [joinedByMe, effectiveUserId, myUsername, myName]
     );
 
     const refreshOneMatch = useCallback(async (id) => {
@@ -416,12 +485,12 @@ export default function Page() {
 
             if (action === "add") {
                 const already =
-                    clone.players.some((p) => String(p.id) === String(currentUserId)) ||
+                    clone.players.some((p) => String(p.id) === String(effectiveUserId)) ||
                     clone.players.some((p) => norm(p.username) === norm(myUsername)) ||
                     clone.players.some((p) => norm(p.name) === norm(myName || myUsername));
                 if (!already) {
                     clone.players.push({
-                        id: currentUserId || `me-${randKey()}`,
+                        id: effectiveUserId || `me-${randKey()}`, // guest uses jwt subject ("guest:<uuid>")
                         name: myName || myUsername || "You",
                         username: myUsername || "",
                         status: "JOINED",
@@ -430,7 +499,7 @@ export default function Page() {
             } else {
                 clone.players = clone.players.filter(
                     (p) =>
-                        String(p.id) !== String(currentUserId) &&
+                        String(p.id) !== String(effectiveUserId) &&
                         norm(p.username) !== norm(myUsername) &&
                         norm(p.name) !== norm(myName || myUsername)
                 );
@@ -572,8 +641,6 @@ export default function Page() {
         return () => window.removeEventListener("matches:refresh", onHdr);
     }, [handleHeaderRefresh]);
 
-
-
     /* -------- UI -------- */
     if (loading) {
         return (
@@ -608,7 +675,7 @@ export default function Page() {
                     </div>
                 )}
 
-                {!!locError && (
+                {!!locError && !isGuest && (
                     <div className="rounded-xl border border-yellow-700/30 bg-yellow-900/20 p-3 text-yellow-100 mb-4 text-sm">
                         {locError}
                     </div>
@@ -637,7 +704,7 @@ export default function Page() {
                                 <div key={m._key} className="relative">
                                     <MatchCard
                                         match={{ ...m, _pending: !!pending[m.id] }}
-                                        currentUserId={currentUserId}
+                                        currentUserId={effectiveUserId}
                                         isJoined={(x) => isJoined(x)}
                                         onJoin={(idFromCard) => {
                                             const id = idFromCard || m.id;
@@ -648,41 +715,39 @@ export default function Page() {
                                             const id = idFromCard || m.id;
                                             handleLeave(id);
                                         }}
-                                        onDelete={() => deleteMatch(m.id)}
-                                        onShare={() => {
-                                            if (!m.id) {
-                                                alert("Save the match first to get a shareable link.");
-                                                return;
+                                        {...(!isGuest && {
+                                            onDelete: () => deleteMatch(m.id),
+                                            onShare: () => {
+                                                if (!m.id) {
+                                                    alert("Save the match first to get a shareable link.");
+                                                    return;
+                                                }
+                                                const url = new URL(window.location.href);
+                                                url.searchParams.set("match", m.id);
+                                                navigator.clipboard?.writeText?.(url.toString());
+                                                alert("Sharable join link copied!");
+                                            },
+                                            onKick: async (matchId, playerId) => {
+                                                if (!matchId || !playerId) return;
+                                                setPending((p) => ({ ...p, [matchId]: true }));
+                                                try { await api.kickPlayer(matchId, playerId); }
+                                                catch (e) { alert(e?.message || "Failed to remove player"); }
+                                                finally {
+                                                    setPending((p) => {
+                                                        const next = { ...p };
+                                                        delete next[matchId];
+                                                        return next;
+                                                    });
+                                                }
+                                            },
+                                            onEdited: upsertMatchIntoList,
+                                            locations,
+                                            onAddLocation: async (name) => {
+                                                await api.createLocation(name);
+                                                await fetchLocations();
                                             }
-                                            const url = new URL(window.location.href);
-                                            url.searchParams.set("match", m.id);
-                                            navigator.clipboard?.writeText?.(url.toString());
-                                            alert("Sharable join link copied!");
-                                        }}
-                                        onKick={async (matchId, playerId) => {
-                                            if (!matchId || !playerId) return;
-                                            // mark busy
-                                            setPending((p) => ({ ...p, [matchId]: true }));
-                                            try {
-                                                await api.kickPlayer(matchId, playerId);
-                                                // MatchCard itself refetches after success
-                                            } catch (e) {
-                                                alert(e?.message || "Failed to remove player");
-                                            } finally {
-                                                // clear busy (remove the key to avoid stale truthy values)
-                                                setPending((p) => {
-                                                    const next = { ...p };
-                                                    delete next[matchId];
-                                                    return next;
-                                                });
-                                            }
-                                        }}
-                                        onEdited={upsertMatchIntoList}       // keep page state in sync on any edit
-                                        locations={locations}
-                                        onAddLocation={async (name) => {
-                                            await api.createLocation(name);
-                                            await fetchLocations();
-                                        }}
+                                        })}
+                                        // If your MatchCard supports it, you can also pass readOnly={isGuest}
                                     />
                                 </div>
                             ))}
@@ -720,14 +785,16 @@ export default function Page() {
                                     <div className="opacity-85 hover:opacity-100 transition-opacity">
                                         <MatchCard
                                             match={{ ...m, _pending: !!pending[m.id] }}
-                                            currentUserId={currentUserId}
+                                            currentUserId={effectiveUserId}
                                             isJoined={(x) => isJoined(x)}
-                                            onEdited={upsertMatchIntoList}
-                                            locations={locations}
-                                            onAddLocation={async (name) => {
-                                                await api.createLocation(name);
-                                                await fetchLocations();
-                                            }}
+                                            {...(!isGuest && {
+                                                onEdited: upsertMatchIntoList,
+                                                locations,
+                                                onAddLocation: async (name) => {
+                                                    await api.createLocation(name);
+                                                    await fetchLocations();
+                                                }
+                                            })}
                                         />
                                     </div>
                                 </div>

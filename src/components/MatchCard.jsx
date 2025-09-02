@@ -22,6 +22,34 @@ const pickFirst = (...vals) => {
     return "";
 };
 
+function isGuestNow() {
+    try {
+        const ai = JSON.parse(localStorage.getItem("authIdentity") || "{}");
+        const roles = Array.isArray(ai?.roles) ? ai.roles : String(ai?.roles || "").split(/\s+/);
+        const identityGuest =
+            ai?.isGuest === true ||
+            roles.some((r) => String(r).toUpperCase() === "ROLE_GUEST" || String(r).toUpperCase() === "GUEST");
+
+        let tokenGuest = false;
+        const token = localStorage.getItem("accessToken");
+        if (token) {
+            const [, payloadB64] = token.split(".");
+            if (payloadB64) {
+                const j = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+                const scopes =
+                    j?.scope || j?.scopes || j?.authorities || j?.roles || [];
+                const arr = Array.isArray(scopes) ? scopes : String(scopes || "").split(/\s+/);
+                tokenGuest =
+                    j?.guest === true ||
+                    arr.some((r) => String(r).toUpperCase() === "ROLE_GUEST" || String(r).toUpperCase() === "GUEST");
+            }
+        }
+        return identityGuest || tokenGuest;
+    } catch {
+        return false;
+    }
+}
+
 /* -------- date helpers -------- */
 function parseYMD(s) {
     const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(s || ""));
@@ -220,6 +248,7 @@ function getPlayerName(p) {
 }
 
 /* ===================== COMPONENT ===================== */
+/* ===================== COMPONENT ===================== */
 export default function MatchCard({
                                       match,
                                       currentUserId,
@@ -237,6 +266,16 @@ export default function MatchCard({
     const [localMatch, setLocalMatch] = React.useState(match);
     React.useEffect(() => setLocalMatch(match), [match]);
 
+    // guest flag + keep in sync with storage
+    const [guest, setGuest] = React.useState(false);
+    React.useEffect(() => {
+        setGuest(isGuestNow());
+        const onStorage = () => setGuest(isGuestNow());
+        window.addEventListener("storage", onStorage);
+        return () => window.removeEventListener("storage", onStorage);
+    }, []);
+
+    // UI state
     const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
     const [kickTarget, setKickTarget] = React.useState(null);
     const [editOpen, setEditOpen] = React.useState(false);
@@ -294,8 +333,6 @@ export default function MatchCard({
 
         async function hydrate() {
             if (!localMatch?.id) return;
-            hydratedRef.current = false;
-
             if (hydratedRef.current) return;
             if (!needsHydration(localMatch)) {
                 hydratedRef.current = true;
@@ -437,7 +474,7 @@ export default function MatchCard({
         if (!localMatch?.id) return;
         try {
             if (typeof onJoin === "function") await onJoin(localMatch.id);
-            else if (typeof api?.joinMatch === "function") await api.joinMatch(localMatch.id);
+            else if (typeof api?.join === "function") await api.join(localMatch.id); // POST /match/join/{id}
         } catch (e) {
             alert(e?.message || "Failed to join");
         } finally {
@@ -495,7 +532,8 @@ export default function MatchCard({
         };
         setSaving(true);
         try {
-            const res = typeof onUpdate === "function" ? await onUpdate(payload) : await api.updateMatch(payload);
+            const res =
+                typeof onUpdate === "function" ? await onUpdate(payload) : await api.updateMatch(payload);
             await refetchMatch();
             const updated = res?.data ? { ...localMatch, ...res.data } : { ...localMatch, ...payload };
             onEdited?.(updated);
@@ -642,8 +680,8 @@ export default function MatchCard({
                         </div>
                     </div>
 
-                    {/* Share / Edit / Delete hidden for past */}
-                    {!pastMode && (
+                    {/* Share / Edit / Delete hidden for past and for guests */}
+                    {!pastMode && !guest && (
                         <div className="flex items-center gap-2 shrink-0">
                             <button
                                 onClick={() => onShare?.(localMatch)}
@@ -729,7 +767,8 @@ export default function MatchCard({
                       Waitlist
                     </span>
                                     )}
-                                    {!pastMode && (
+                                    {/* Guests cannot kick */}
+                                    {!pastMode && !guest && (
                                         <button
                                             onClick={() => setKickTarget({ id: pl.id, name: pl.name })}
                                             className="ml-1 text-red-300 hover:text-red-200"
@@ -786,8 +825,8 @@ export default function MatchCard({
                     </div>
                 )}
 
-                {/* PAST: result editor */}
-                {pastMode && (
+                {/* PAST: result editor (hide for guests) */}
+                {pastMode && !guest && (
                     <div className="mt-5 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
                         <div className="flex items-center justify-between gap-3">
                             <div className="text-sm text-slate-300">
@@ -975,9 +1014,7 @@ export default function MatchCard({
                                             onClick={handleAddLocationInline}
                                             disabled={addingLoc || !newLoc.trim()}
                                             className={`h-11 w-full sm:w-auto text-base rounded-xl px-4 font-medium transition ${
-                                                addingLoc
-                                                    ? "bg-slate-700 text-slate-300 cursor-not-allowed"
-                                                    : "bg-yellow-400 text-slate-900 hover:bg-yellow-300"
+                                                addingLoc ? "bg-slate-700 text-slate-300 cursor-not-allowed" : "bg-yellow-400 text-slate-900 hover:bg-yellow-300"
                                             }`}
                                         >
                                             {addingLoc ? "Adding…" : "Add"}
@@ -1033,9 +1070,7 @@ export default function MatchCard({
             <Modal open={!!kickTarget} onClose={() => setKickTarget(null)}>
                 <div className="bg-slate-800 border border-slate-600 rounded-2xl shadow-xl p-6 w-[90%] max-w-sm">
                     <h4 className="text-lg font-semibold text-white">Remove player?</h4>
-                    <p className="text-sm text-slate-300 mt-1">
-                        {kickTarget?.name} will be removed from this match.
-                    </p>
+                    <p className="text-sm text-slate-300 mt-1">{kickTarget?.name} will be removed from this match.</p>
                     <div className="mt-5 flex justify-end gap-3">
                         <button
                             onClick={() => setKickTarget(null)}
@@ -1061,3 +1096,5 @@ export default function MatchCard({
         </div>
     );
 }
+
+
