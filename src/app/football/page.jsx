@@ -9,7 +9,6 @@ import { api } from "../../api/real.js";
 
 /* ---------------- utils ---------------- */
 const randKey = () => Math.random().toString(36).slice(2);
-
 const prettyError = (e, fallback = "Something went wrong") => {
     if (!e) return fallback;
     if (typeof e === "string") return e;
@@ -660,7 +659,24 @@ export default function Page() {
                                             navigator.clipboard?.writeText?.(url.toString());
                                             alert("Sharable join link copied!");
                                         }}
-                                        onKick={() => alert("Implement kick() on backend and hook here")}
+                                        onKick={async (matchId, playerId) => {
+                                            if (!matchId || !playerId) return;
+                                            // mark busy
+                                            setPending((p) => ({ ...p, [matchId]: true }));
+                                            try {
+                                                await api.kickPlayer(matchId, playerId);
+                                                // MatchCard itself refetches after success
+                                            } catch (e) {
+                                                alert(e?.message || "Failed to remove player");
+                                            } finally {
+                                                // clear busy (remove the key to avoid stale truthy values)
+                                                setPending((p) => {
+                                                    const next = { ...p };
+                                                    delete next[matchId];
+                                                    return next;
+                                                });
+                                            }
+                                        }}
                                         onEdited={upsertMatchIntoList}       // keep page state in sync on any edit
                                         locations={locations}
                                         onAddLocation={async (name) => {

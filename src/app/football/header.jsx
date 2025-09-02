@@ -869,11 +869,11 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                     <div className="flex items-center gap-3">
                         <img
                             src="https://res.cloudinary.com/dayrc0f7r/image/upload/v1755757391/IMG_1547_tejn31.png"
-                            alt="Jerry FC Logo"
+                            alt="Jerry FT Logo"
                             className="h-10 sm:h-12 w-auto object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]"
                         />
                         <span className="text-xl sm:text-2xl font-extrabold tracking-wider text-yellow-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-              Jerry FC
+              Jerry FT
             </span>
                     </div>
 
@@ -998,7 +998,7 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
                     <div className="bg-slate-800 border border-slate-600 rounded-2xl shadow-xl p-6 w-[90%] max-w-sm">
                         <h4 className="text-lg font-semibold text-white">Log out?</h4>
-                        <p className="text-sm text-slate-300 mt-1">You’ll be signed out of Jerry FC on this device.</p>
+                        <p className="text-sm text-slate-300 mt-1">You’ll be signed out of Jerry FT on this device.</p>
                         <div className="mt-5 flex justify-end gap-3">
                             <button
                                 onClick={() => setConfirmLogoutOpen(false)}

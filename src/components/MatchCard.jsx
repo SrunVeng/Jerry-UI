@@ -121,6 +121,7 @@ const pickTime = (m) =>
 const pickPitch = (m) =>
     pickFirst(m?.pitchNumber, m?.pitch, m?.pitchNo, m?.pitch_no, m?.fieldNumber, m?.field_no);
 
+/* ---------- misc helpers ---------- */
 function buildLocalDateTime(match) {
     const rawDate = match?.date ?? match?.matchDate ?? "";
     const rawTime = pickTime(match);
@@ -137,7 +138,6 @@ function buildLocalDateTime(match) {
     return d;
 }
 
-/* -------- accent colors -------- */
 function accentClasses({ past, result }) {
     if (past) {
         switch (String(result || "").toUpperCase()) {
@@ -203,6 +203,22 @@ function extractOpponentName(m) {
     return t;
 }
 
+/* -------- safer player id/name getters -------- */
+function getPlayerId(p) {
+    // Support multiple possible shapes: {id}, {userId}, {user:{id}}, {playerId}
+    return String(
+        pickFirst(
+            p?.id,
+            p?.userId,
+            p?.playerId,
+            p?.user?.id
+        )
+    );
+}
+function getPlayerName(p) {
+    return String(p?.name ?? p?.username ?? p?.displayName ?? p?.user?.displayName ?? "Unknown");
+}
+
 /* ===================== COMPONENT ===================== */
 export default function MatchCard({
                                       match,
@@ -212,7 +228,7 @@ export default function MatchCard({
                                       onLeave,
                                       onDelete,
                                       onShare,
-                                      onKick,
+                                      onKick, // optional override
                                       onUpdate,
                                       onEdited,
                                       locations = [],
@@ -236,8 +252,8 @@ export default function MatchCard({
             return raw.map((name, i) => ({ id: `tmp-${i + 1}`, name: String(name), status: undefined }));
         }
         return raw.map((p, i) => ({
-            id: String(p?.id ?? `tmp-${i + 1}`),
-            name: String(p?.name ?? p?.username ?? p?.displayName ?? "Unknown"),
+            id: getPlayerId(p) || `tmp-${i + 1}`,
+            name: getPlayerName(p),
             status: p?.status,
         }));
     }, [localMatch?.players]);
@@ -253,10 +269,10 @@ export default function MatchCard({
         const now = Date.now();
         if (localMatch?._when) {
             const t = new Date(localMatch._when).getTime();
-            if (Number.isFinite(t)) return t < (now - GRACE_MS);
+            if (Number.isFinite(t)) return t < now - GRACE_MS;
         }
         const dt = buildLocalDateTime(localMatch);
-        return dt ? dt.getTime() < (now - GRACE_MS) : false;
+        return dt ? dt.getTime() < now - GRACE_MS : false;
     }, [localMatch]);
 
     /* ---------- DETAIL AUTO-HYDRATE (runs once per id) ---------- */
@@ -278,7 +294,6 @@ export default function MatchCard({
 
         async function hydrate() {
             if (!localMatch?.id) return;
-            // reset the flag when id changes
             hydratedRef.current = false;
 
             if (hydratedRef.current) return;
@@ -314,15 +329,13 @@ export default function MatchCard({
                     };
                 });
 
-                // also prefill the edit form, if opened later
                 setForm((f) => ({
                     ...f,
                     date: toDateInputValue(pickFirst(details.matchDate, details.date, f.date)),
                     time: toTimeInputValue(pickFirst(details.time, details.kickOffTime, f.time)),
                     pitchNumber: nz(pickFirst(details.pitchNumber, details.pitch, f.pitchNumber), ""),
                     location: nz(pickFirst(details.location, f.location), ""),
-                    maxPlayers:
-                        Number(pickFirst(details.maxPlayers, details.numberPlayer, f.maxPlayers)) || f.maxPlayers || 12,
+                    maxPlayers: Number(pickFirst(details.maxPlayers, details.numberPlayer, f.maxPlayers)) || f.maxPlayers || 12,
                     notes: nz(pickFirst(details.notes, details.description, f.notes), ""),
                 }));
             } catch (e) {
@@ -339,10 +352,9 @@ export default function MatchCard({
         return () => {
             cancelled = true;
         };
-        // re-run when the id changes
     }, [localMatch?.id]);
 
-    /* ---------- manual DETAILS on Edit open (kept as backup) ---------- */
+    /* ---------- manual DETAILS on Edit open (backup) ---------- */
     async function fetchDetails(id) {
         try {
             setDetailsLoading(true);
@@ -423,27 +435,49 @@ export default function MatchCard({
 
     async function handleJoin() {
         if (!localMatch?.id) return;
-        if (typeof onJoin === "function") await onJoin(localMatch.id);
-        else if (typeof api?.joinMatch === "function") await api.joinMatch(localMatch.id);
-        await refetchMatch();
+        try {
+            if (typeof onJoin === "function") await onJoin(localMatch.id);
+            else if (typeof api?.joinMatch === "function") await api.joinMatch(localMatch.id);
+        } catch (e) {
+            alert(e?.message || "Failed to join");
+        } finally {
+            await refetchMatch();
+        }
     }
+
     async function handleLeave() {
         if (!localMatch?.id) return;
-        if (typeof onLeave === "function") await onLeave(localMatch.id);
-        else if (typeof api?.leaveMatch === "function") await api.leaveMatch(localMatch.id);
-        await refetchMatch();
+        try {
+            if (typeof onLeave === "function") await onLeave(localMatch.id);
+            else if (typeof api?.leaveMatch === "function") await api.leaveMatch(localMatch.id);
+        } catch (e) {
+            alert(e?.message || "Failed to leave");
+        } finally {
+            await refetchMatch();
+        }
     }
+
     async function handleKick(pid) {
         if (!localMatch?.id || !pid) return;
-        if (typeof onKick === "function") await onKick(localMatch.id, pid);
-        else if (typeof api?.kickPlayer === "function") await api.kickPlayer(localMatch.id, pid);
-        await refetchMatch();
+        try {
+            if (typeof onKick === "function") await onKick(localMatch.id, pid);
+            else if (typeof api?.kickPlayer === "function") await api.kickPlayer(localMatch.id, pid);
+        } catch (e) {
+            alert(e?.message || "Failed to remove player");
+        } finally {
+            await refetchMatch();
+        }
     }
+
     async function handleDelete() {
         if (!localMatch?.id) return;
-        if (typeof onDelete === "function") await onDelete(localMatch.id);
-        else if (typeof api?.deleteMatch === "function") await api.deleteMatch(localMatch.id);
-        setConfirmDeleteOpen(false);
+        try {
+            if (typeof onDelete === "function") await onDelete(localMatch.id);
+            else if (typeof api?.deleteMatch === "function") await api.deleteMatch(localMatch.id);
+            setConfirmDeleteOpen(false);
+        } catch (e) {
+            alert(e?.message || "Failed to delete match");
+        }
     }
 
     async function handleSaveEdit() {
@@ -558,7 +592,7 @@ export default function MatchCard({
                         <div className="mt-1 text-sm text-slate-100 flex flex-wrap items-center gap-x-4 gap-y-1">
                             {/* Date */}
                             <span className="inline-flex items-center gap-1">
-                <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor" aria-hidden="true">
                   <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zm12 9H5v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8zM6 7h12V6H6v1z" />
                 </svg>
                 <span>{localMatch?.date || localMatch?.matchDate || toDateInputValue(localMatch?._when)}</span>
@@ -566,7 +600,7 @@ export default function MatchCard({
 
                             {/* Time */}
                             <span className="inline-flex items-center gap-1">
-                <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor" aria-hidden="true">
                   <path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm1 10V7a1 1 0 1 0-2 0v6a1 1 0 0 0 .293.707l3 3a1 1 0 1 0 1.414-1.414L13 12z" />
                 </svg>
                 <span>{headerTime || "--:--"}</span>
@@ -574,7 +608,7 @@ export default function MatchCard({
 
                             {/* Location */}
                             <span className="inline-flex items-center gap-1 text-slate-300">
-                <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="currentColor" aria-hidden="true">
                   <path d="M12 2C8.14 2 5 5.14 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.86-3.14-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z" />
                 </svg>
                 <span className="truncate max-w-[18rem]">{localMatch?.location || ""}</span>
@@ -658,7 +692,7 @@ export default function MatchCard({
             </span>
                     </div>
                 </div>
-                <div className="mt-3 h-2 rounded-full bg-slate-700 overflow-hidden">
+                <div className="mt-3 h-2 rounded-full bg-slate-700 overflow-hidden" aria-hidden="true">
                     <div className="h-full bg-yellow-400" style={{ width: `${percent}%` }} />
                 </div>
 
@@ -670,7 +704,9 @@ export default function MatchCard({
                         players.map((pl, idx) => {
                             const inLimit = idx + 1 <= cap;
                             const waitlisted = !inLimit || pl.status === "WAITLIST";
-                            const isYou = !!currentUserId && String(pl.id) === String(currentUserId);
+                            const isYou =
+                                !!currentUserId &&
+                                (String(pl.id) === String(currentUserId) || String(pl.userId) === String(currentUserId));
                             return (
                                 <span
                                     key={`${pl.id}-${idx}`}
@@ -698,6 +734,7 @@ export default function MatchCard({
                                             onClick={() => setKickTarget({ id: pl.id, name: pl.name })}
                                             className="ml-1 text-red-300 hover:text-red-200"
                                             title="Remove player"
+                                            aria-label={`Remove ${pl.name}`}
                                         >
                                             ×
                                         </button>
@@ -727,7 +764,7 @@ export default function MatchCard({
                                 }`}
                                 title="Join"
                             >
-                                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+                                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor" aria-hidden="true">
                                     <path d="M11 11V5a1 1 0 1 1 2 0v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6z" />
                                 </svg>
                                 Join
@@ -810,7 +847,9 @@ export default function MatchCard({
                                         onClick={handleUpdateResult}
                                         disabled={resultSaving}
                                         className={`rounded-xl px-4 py-2.5 font-semibold transition ${
-                                            resultSaving ? "bg-blue-900/20 border border-blue-700/20 text-blue-300/60 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-500"
+                                            resultSaving
+                                                ? "bg-blue-900/20 border border-blue-700/20 text-blue-300/60 cursor-not-allowed"
+                                                : "bg-blue-600 text-white hover:bg-blue-500"
                                         }`}
                                     >
                                         {resultSaving ? "Saving…" : "Save Result"}
@@ -835,7 +874,10 @@ export default function MatchCard({
                         >
                             Cancel
                         </button>
-                        <button onClick={handleDelete} className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition">
+                        <button
+                            onClick={handleDelete}
+                            className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition"
+                        >
                             Delete
                         </button>
                     </div>
@@ -933,7 +975,9 @@ export default function MatchCard({
                                             onClick={handleAddLocationInline}
                                             disabled={addingLoc || !newLoc.trim()}
                                             className={`h-11 w-full sm:w-auto text-base rounded-xl px-4 font-medium transition ${
-                                                addingLoc ? "bg-slate-700 text-slate-300 cursor-not-allowed" : "bg-yellow-400 text-slate-900 hover:bg-yellow-300"
+                                                addingLoc
+                                                    ? "bg-slate-700 text-slate-300 cursor-not-allowed"
+                                                    : "bg-yellow-400 text-slate-900 hover:bg-yellow-300"
                                             }`}
                                         >
                                             {addingLoc ? "Adding…" : "Add"}
@@ -989,7 +1033,9 @@ export default function MatchCard({
             <Modal open={!!kickTarget} onClose={() => setKickTarget(null)}>
                 <div className="bg-slate-800 border border-slate-600 rounded-2xl shadow-xl p-6 w-[90%] max-w-sm">
                     <h4 className="text-lg font-semibold text-white">Remove player?</h4>
-                    <p className="text-sm text-slate-300 mt-1">{kickTarget?.name} will be removed from this match.</p>
+                    <p className="text-sm text-slate-300 mt-1">
+                        {kickTarget?.name} will be removed from this match.
+                    </p>
                     <div className="mt-5 flex justify-end gap-3">
                         <button
                             onClick={() => setKickTarget(null)}
