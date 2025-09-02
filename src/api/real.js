@@ -1,10 +1,11 @@
-// Example .env for Next.js:
+8// Example .env for Next.js:
 // NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api
 
 const BASE_URL = (
     // eslint-disable-next-line no-undef
     (typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_API_BASE_URL) ||
-    "https://jerry-server-dm4m.onrender.com/api"
+     "https://jerry-server-dm4m.onrender.com/api"
+    // "http://localhost:8080/api"
 ).replace(/\/+$/, "");
 
 const USE_COOKIES = false; // set true only if your backend uses cookie sessions
@@ -242,6 +243,17 @@ export const api = {
             notes: data.notes,
         };
         return request("/match/update", { method: "PATCH", body });
+    },
+
+    updateMatchResult(data) {
+        const body = {
+            id: data.id,
+            ...(data.teamScore !== undefined ? { teamScore: data.teamScore } : {}),
+            ...(data.opponentScore !== undefined ? { opponentScore: data.opponentScore } : {}),
+            // optional override if you ever want to force it:
+            ...(data.result ? { result: data.result } : {}),
+        };
+        return request("/match/update-result", { method: "POST", body });
     },
 
     createLocation(name) {

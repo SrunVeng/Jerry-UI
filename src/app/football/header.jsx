@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/real.js";
+import { PlusCircle, UserCog, LogOut, Menu, X } from "lucide-react";
 
 /* ---------------- tiny utils ---------------- */
 const norm = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
@@ -10,7 +11,7 @@ const norm = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
 function getMeFromStorage() {
     try {
         const raw = localStorage.getItem("authIdentity");
-        if (!raw) return { id: "", username: "", displayName: "", roles: [] };
+        if (!raw) return { id: "", username: "", displayName: "", roles: [], isGuest: false };
         const a = JSON.parse(raw);
         const roles =
             a?.roles ?? a?.authorities ?? a?.scopes ?? a?.user?.roles ?? a?.user?.authorities ?? [];
@@ -120,8 +121,9 @@ function Sheet({ title, subtitle, open, onClose, children, side = "center", size
                     </div>
                     <button
                         onClick={onClose}
-                        className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800"
+                        className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 flex items-center gap-1"
                     >
+                        <X className="h-4 w-4" />
                         Close
                     </button>
                 </div>
@@ -151,7 +153,7 @@ function Select(props) {
     return (
         <select
             {...props}
-            className={`w-full rounded-xl bg-slate-900/60 border border-slate-700 text-slate-100 px-3 py-2 outline-none focus:border-slate-500 focus:ring-2 focus:ring-yellow-400/30 ${props.className || ""}`}
+            className={`w-full rounded-xl bg-slate-900/60 border border-slate-700 text-slate-100 px-3 py-2 outline-none focus:border-slate-500 focus:ring-2 focus:ring-yellow-400/30 [color-scheme:dark] ${props.className || ""}`}
         />
     );
 }
@@ -166,6 +168,7 @@ function CreateMatchSheet({ open, onClose, onDone, pushToast }) {
         location: "",
         numberPlayer: 12,
         notes: "",
+        pitchNumber: "",
     });
     const [busy, setBusy] = useState(false);
 
@@ -232,21 +235,29 @@ function CreateMatchSheet({ open, onClose, onDone, pushToast }) {
     }
 
     async function handleCreate() {
-        if (!draft.opponentName.trim())
-            return pushToast({ type: "error", title: "Missing opponent", message: "Please enter an opponent." });
-        if (!draft.date)
-            return pushToast({ type: "error", title: "Missing date", message: "Please pick the match date." });
+        if (!draft.opponentName.trim()) { /* ... */ }
+        if (!draft.date) { /* ... */ }
         setBusy(true);
         try {
-            await api.createMatch({
+            const res = await api.createMatch({
                 opponentName: draft.opponentName,
                 matchDate: draft.date,
                 time: draft.time,
                 location: draft.location,
                 numberPlayer: draft.numberPlayer,
                 notes: draft.notes,
+                pitchNumber:
+                    String(draft.pitchNumber || "").trim() || undefined,
             });
-            onDone?.();
+
+            const created = res?.data ?? res ?? null;  // capture created match
+            onDone?.(created);
+
+            // 🔔 Notify any page that cares (like /matches) to refresh
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(new CustomEvent("matches:refresh", { detail: created }));
+            }
+
             pushToast({
                 type: "success",
                 title: "Match created",
@@ -282,15 +293,31 @@ function CreateMatchSheet({ open, onClose, onDone, pushToast }) {
                         </Field>
                     </div>
 
+                    {/* 👇 Add this new row for Pitch Number (or move it wherever you prefer) */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <Field label="Pitch Number">
+                            <Input
+                                placeholder="e.g., 3"
+                                value={draft.pitchNumber}
+                                onChange={(e) =>
+                                    setDraft((d) => ({ ...d, pitchNumber: e.target.value }))
+                                }
+                            />
+                        </Field>
+                        <div /> {/* spacer to keep grid balanced */}
+                    </div>
+
                     {/* Location picker + add new */}
                     <div className="grid grid-cols-1 gap-2">
                         <Field label="Location">
                             {!addMode ? (
                                 <div className="flex gap-2">
                                     <Select value={draft.location} onChange={(e) => setDraft((d) => ({ ...d, location: e.target.value }))}>
-                                        <option value="">{locLoading ? "Loading..." : "— Select location —"}</option>
+                                        <option className="bg-slate-900 text-slate-100" value="">
+                                            {locLoading ? "Loading..." : "— Select location —"}
+                                        </option>
                                         {locs.map((name) => (
-                                            <option key={name} value={name}>
+                                            <option key={name} value={name} className="bg-slate-900 text-slate-100">
                                                 {name}
                                             </option>
                                         ))}
@@ -316,7 +343,10 @@ function CreateMatchSheet({ open, onClose, onDone, pushToast }) {
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => { setAddMode(false); setNewLoc(""); }}
+                                        onClick={() => {
+                                            setAddMode(false);
+                                            setNewLoc("");
+                                        }}
                                         className="shrink-0 rounded-xl border border-slate-700 text-slate-200 hover:bg-slate-800 px-3"
                                     >
                                         Cancel
@@ -673,8 +703,8 @@ function AdminUsersSheet({ open, onClose, onDone, pushToast }) {
                         </Field>
                         <Field label="Role">
                             <Select value={c.role} onChange={(e) => setC({ ...c, role: e.target.value })}>
-                                <option value="USER">USER</option>
-                                <option value="ADMIN">ADMIN</option>
+                                <option value="USER" className="bg-slate-900 text-slate-100">USER</option>
+                                <option value="ADMIN" className="bg-slate-900 text-slate-100">ADMIN</option>
                             </Select>
                         </Field>
                         <Field label="Email">
@@ -712,8 +742,8 @@ function AdminUsersSheet({ open, onClose, onDone, pushToast }) {
                         </Field>
                         <Field label="Role">
                             <Select value={u.role} onChange={(e) => setU({ ...u, role: e.target.value })}>
-                                <option value="USER">USER</option>
-                                <option value="ADMIN">ADMIN</option>
+                                <option value="USER" className="bg-slate-900 text-slate-100">USER</option>
+                                <option value="ADMIN" className="bg-slate-900 text-slate-100">ADMIN</option>
                             </Select>
                         </Field>
                         <Field label="Email">
@@ -798,7 +828,7 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
     }, [allRoles]);
     const effectiveIsAdmin = Boolean(isAdmin ?? derivedIsAdmin);
 
-    const hasJwt = Boolean(localStorage.getItem("accessToken"));
+    const hasJwt = Boolean(typeof window !== "undefined" && localStorage.getItem("accessToken"));
     const isGuest = me.isGuest || (me.roles || []).includes("GUEST");
 
     const user = currentUser || {
@@ -818,15 +848,18 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
         setToasts((arr) => [...arr, { id: Math.random().toString(36).slice(2), duration: 2600, ...t }]);
 
     async function handleLogout() {
-        try { await api.logout?.(); } catch {}
+        try {
+            await api.logout?.();
+        } catch {}
     }
 
-    const handleRefresh = () => onRefresh?.();
+    // IMPORTANT: forward created entity to parent page so it can insert or refetch
+    const handleRefresh = (created) => onRefresh?.(created);
 
     // visibility rules
     const showCreateMatch = hasJwt && !isGuest;
-    const showAdmin      = hasJwt && effectiveIsAdmin;
-    const showLogout     = hasJwt && !isGuest;
+    const showAdmin = hasJwt && effectiveIsAdmin;
+    const showLogout = hasJwt && !isGuest;
 
     return (
         <>
@@ -836,11 +869,11 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                     <div className="flex items-center gap-3">
                         <img
                             src="https://res.cloudinary.com/dayrc0f7r/image/upload/v1755757391/IMG_1547_tejn31.png"
-                            alt="Jerry FT Logo"
+                            alt="Jerry FC Logo"
                             className="h-10 sm:h-12 w-auto object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]"
                         />
                         <span className="text-xl sm:text-2xl font-extrabold tracking-wider text-yellow-400 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-              Jerry FT
+              Jerry FC
             </span>
                     </div>
 
@@ -849,9 +882,10 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                         {showCreateMatch && (
                             <button
                                 onClick={() => setOpenCreate(true)}
-                                className="rounded-lg bg-yellow-400 hover:bg-yellow-300 text-slate-900 px-3 py-1.5 text-sm font-semibold"
+                                className="rounded-lg bg-yellow-400 hover:bg-yellow-300 text-slate-900 px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5"
                                 title="Create Match"
                             >
+                                <PlusCircle className="h-4 w-4" />
                                 Create Match
                             </button>
                         )}
@@ -859,9 +893,10 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                         {showAdmin && (
                             <button
                                 onClick={() => setOpenAdminUsers(true)}
-                                className="rounded-lg border border-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 text-sm font-semibold"
+                                className="rounded-lg border border-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5"
                                 title="Admin panel"
                             >
+                                <UserCog className="h-4 w-4" />
                                 Admin
                             </button>
                         )}
@@ -869,9 +904,10 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                         {showLogout && (
                             <button
                                 onClick={() => setConfirmLogoutOpen(true)}
-                                className="rounded-lg bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 text-sm font-semibold"
+                                className="rounded-lg bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5"
                                 title="Logout"
                             >
+                                <LogOut className="h-4 w-4" />
                                 Logout
                             </button>
                         )}
@@ -882,14 +918,10 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                         <button
                             aria-label="Open menu"
                             onClick={() => setOpenMobileMenu(true)}
-                            className="rounded-xl border border-slate-700 text-slate-200 px-3 py-2 active:scale-[.98]"
+                            className="rounded-xl border border-slate-700 text-slate-200 px-3 py-2 active:scale-[.98] flex items-center gap-1.5"
                         >
+                            <Menu className="h-5 w-5" />
                             <span className="sr-only">Menu</span>
-                            <div className="space-y-1.5">
-                                <div className="h-0.5 w-6 bg-slate-200 rounded"></div>
-                                <div className="h-0.5 w-6 bg-slate-200 rounded"></div>
-                                <div className="h-0.5 w-6 bg-slate-200 rounded"></div>
-                            </div>
                         </button>
                     </div>
                 </div>
@@ -907,28 +939,40 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                     <div className="divide-y divide-slate-800 rounded-2xl overflow-hidden border border-slate-700">
                         {showCreateMatch && (
                             <button
-                                onClick={() => { setOpenMobileMenu(false); setOpenCreate(true); }}
-                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-slate-100"
+                                onClick={() => {
+                                    setOpenMobileMenu(false);
+                                    setOpenCreate(true);
+                                }}
+                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-slate-100 flex items-center gap-2"
                             >
-                                ➕ Create Match
+                                <PlusCircle className="h-5 w-5" />
+                                <span>Create Match</span>
                             </button>
                         )}
 
                         {showAdmin && (
                             <button
-                                onClick={() => { setOpenMobileMenu(false); setOpenAdminUsers(true); }}
-                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-slate-100"
+                                onClick={() => {
+                                    setOpenMobileMenu(false);
+                                    setOpenAdminUsers(true);
+                                }}
+                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-slate-100 flex items-center gap-2"
                             >
-                                🛠️ Admin
+                                <UserCog className="h-5 w-5" />
+                                <span>Admin</span>
                             </button>
                         )}
 
                         {showLogout && (
                             <button
-                                onClick={() => { setOpenMobileMenu(false); setConfirmLogoutOpen(true); }}
-                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-red-300"
+                                onClick={() => {
+                                    setOpenMobileMenu(false);
+                                    setConfirmLogoutOpen(true);
+                                }}
+                                className="w-full text-left px-4 py-3 hover:bg-slate-800 text-red-300 flex items-center gap-2"
                             >
-                                🚪 Logout
+                                <LogOut className="h-5 w-5" />
+                                <span>Logout</span>
                             </button>
                         )}
                     </div>
@@ -936,7 +980,12 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
             </Sheet>
 
             {/* Sheets */}
-            <CreateMatchSheet open={openCreate} onClose={() => setOpenCreate(false)} onDone={handleRefresh} pushToast={pushToast} />
+            <CreateMatchSheet
+                open={openCreate}
+                onClose={() => setOpenCreate(false)}
+                onDone={handleRefresh}
+                pushToast={pushToast}
+            />
             <AdminUsersSheet
                 open={Boolean(showAdmin && openAdminUsers)}
                 onClose={() => setOpenAdminUsers(false)}
@@ -957,7 +1006,8 @@ export default function Header({ isAdmin, currentUser, onRefresh }) {
                             >
                                 Cancel
                             </button>
-                            <button onClick={handleLogout} className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition">
+                            <button onClick={handleLogout} className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-500 transition flex items-center gap-1.5">
+                                <LogOut className="h-4 w-4" />
                                 Logout
                             </button>
                         </div>
