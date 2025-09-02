@@ -4,8 +4,8 @@
 const BASE_URL = (
     // eslint-disable-next-line no-undef
     (typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_API_BASE_URL) ||
-     // "https://jerry-server-dm4m.onrender.com/api"
-     "http://localhost:8080/api"
+     "https://jerry-server-dm4m.onrender.com/api"
+     // "http://localhost:8080/api"
 ).replace(/\/+$/, "");
 
 const USE_COOKIES = false; // set true only if your backend uses cookie sessions
