@@ -1,13 +1,6 @@
-// src/components/F footballLoader.jsx
+
 import React from "react";
 
-/**
- * FootballLoader
- * Props:
- *  - fullscreen: boolean (default false)
- *  - label: string (accessible text under the spinner)
- *  - hint: string (small helper text)
- */
 export default function FootballLoader({
                                            fullscreen = false,
                                            label = "Loading…",

@@ -1,45 +1,32 @@
-// App.jsx
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Home from "./app/football/home.jsx";
-import AuthPage from "./app/football/AuthPage.jsx";
-import { api } from "./api/real.js";
+import { useEffect, useState } from "react";
+import FootballLoader from "./FootballLoader.jsx";
 
-function PrivateRoute({ children }) {
-    return api.isAuthenticated() ? children : <Navigate to="/" replace />;
-}
-
-// If already logged in, redirect to /home; else render children (AuthPage)
-function PublicOnly({ children }) {
-    return api.isAuthenticated() ? <Navigate to="/home" replace /> : children;
-}
 
 export default function App() {
+    const [loaded, setLoaded] = useState(false);
+
+    useEffect(() => {
+        const timer = setTimeout(() => setLoaded(true), 800);
+        return () => clearTimeout(timer);
+    }, []);
+
     return (
-        <BrowserRouter>
-            <Routes>
-                {/* Public login, hidden from logged-in users */}
-                <Route
-                    path="/"
-                    element={
-                        <PublicOnly>
-                            <AuthPage />
-                        </PublicOnly>
-                    }
-                />
-
-                {/* Protected home */}
-                <Route
-                    path="/home"
-                    element={
-                        <PrivateRoute>
-                            <Home />
-                        </PrivateRoute>
-                    }
-                />
-
-                {/* Fallback */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-        </BrowserRouter>
+        <main className="min-h-screen flex items-center justify-center bg-zinc-900 text-white">
+            {!loaded ? (
+                <FootballLoader fullscreen label="Loading Please Wait" hint="Fetching data from the server" />
+            ) : (
+                <figure className="relative w-full max-w-2xl aspect-[4/5] bg-black/30 rounded-2xl overflow-hidden shadow-2xl">
+                    <img
+                        src="https://en.meming.world/images/en/thumb/7/7f/Polish_Jerry.jpg/300px-Polish_Jerry.jpg"
+                        alt="Meme"
+                        className="w-full h-full object-cover"
+                        draggable={false}
+                    />
+                    <figcaption className="absolute bottom-4 left-1/2 -translate-x-1/2 text-center text-3xl md:text-5xl font-extrabold uppercase drop-shadow-lg" style={{ WebkitTextStroke: "2px black" }}>
+                        HELLO
+                    </figcaption>
+                </figure>
+            )}
+        </main>
     );
 }
