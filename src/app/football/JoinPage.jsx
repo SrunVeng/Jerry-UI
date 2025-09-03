@@ -21,7 +21,21 @@ export default function JoinPage() {
     const [authTried, setAuthTried] = useState(false);
     const [authSubmitting, setAuthSubmitting] = useState(false);
 
-    // 1) Try Telegram finalize (if present), then try to load current session
+    // Helper to read stored guest identity
+    function readStoredGuest() {
+        try {
+            const raw =
+                localStorage.getItem("guestIdentity") ||
+                localStorage.getItem("authIdentity");
+            if (!raw) return null;
+            const o = JSON.parse(raw);
+            return o?.isGuest ? o : null;
+        } catch {
+            return null;
+        }
+    }
+
+    // 1) Try Telegram finalize (if present), then try to load current session; fallback to guestIdentity
     useEffect(() => {
         let cancel = false;
         (async () => {
@@ -33,21 +47,31 @@ export default function JoinPage() {
                         /* ignore finalize errors */
                     }
                 }
+
                 let user = null;
                 try {
-                    user = await api.me();
+                    if (typeof api.me === "function") {
+                        user = await api.me();
+                    }
                 } catch {
                     /* unauthenticated is fine */
                 }
+
+                if (!user) {
+                    user = readStoredGuest();
+                }
+
                 if (!cancel) setMe(user);
             } finally {
                 if (!cancel) setAuthTried(true);
             }
         })();
-        return () => { cancel = true; };
+        return () => {
+            cancel = true;
+        };
     }, []);
 
-    // 2) Username/password login
+    // 2) Username/password login (unchanged)
     const handleLogin = useCallback(
         async ({ username, password }) => {
             if (!username || !password) {
@@ -60,7 +84,9 @@ export default function JoinPage() {
                 // persist lightweight identity (optional)
                 try {
                     localStorage.setItem("authIdentity", JSON.stringify({ username }));
-                } catch { /* empty */ }
+                } catch {
+                    /* empty */
+                }
 
                 const resp = await api.LoginAuth({ username, password });
 
@@ -73,9 +99,7 @@ export default function JoinPage() {
                     resp?.data?.token ||
                     resp?.data?.access_token;
 
-                const refresh =
-                    resp?.refreshToken ||
-                    resp?.data?.refreshToken;
+                const refresh = resp?.refreshToken || resp?.data?.refreshToken;
 
                 if (!token) {
                     showToast("Login succeeded but no token returned", "error");
@@ -85,12 +109,16 @@ export default function JoinPage() {
                 try {
                     localStorage.setItem("accessToken", token);
                     if (refresh) localStorage.setItem("refreshToken", refresh);
-                } catch { /* empty */ }
+                } catch {
+                    /* empty */
+                }
 
                 try {
                     const user = await api.me();
                     setMe(user || null);
-                } catch { /* empty */ }
+                } catch {
+                    /* empty */
+                }
 
                 window.location.replace("/");
             } catch (err) {
@@ -103,8 +131,10 @@ export default function JoinPage() {
                 let msg;
                 if (status === 401) msg = "Invalid username or password";
                 else if (status === 403) msg = "You don’t have permission to sign in here";
-                else if (err?.name === "AbortError") msg = "Login request timed out. Please try again.";
-                else if (err?.message === "Failed to fetch") msg = "Network error. Please check your connection.";
+                else if (err?.name === "AbortError")
+                    msg = "Login request timed out. Please try again.";
+                else if (err?.message === "Failed to fetch")
+                    msg = "Network error. Please check your connection.";
                 else msg = err?.payload?.message || err?.message || "Login failed. Please try again.";
 
                 showToast(msg, "error");
@@ -115,90 +145,61 @@ export default function JoinPage() {
         [showToast]
     );
 
-    // 3) Guest login (disabled)
-    const handleGuestLogin = useCallback(async (maybeName) => {
-        // 1) Ask/validate name
-        const displayName = String(maybeName ?? prompt("Enter a display name") ?? "").trim();
-        if (!displayName) {
-            showToast("Please enter a display name", "error");
-            return;
-        }
+    // 3) Guest login (no backend call, no token)
+    const handleGuestLogin = useCallback(
+        async (maybeName) => {
+            const displayName = String(maybeName ?? prompt("Enter a display name") ?? "").trim();
+            if (!displayName) {
+                showToast("Please enter a display name", "error");
+                return;
+            }
 
-        // Simple helper for extracting fields safely
-        const pick = (obj, ...keys) =>
-            keys.reduce((acc, k) => (obj && obj[k] != null ? obj[k] : acc), undefined);
-
-        setAuthSubmitting(true);
-        try {
-            // 2) Call API
-            const resp = await api.guestAuth({ displayName });
-
-            // Normalize possible response shapes
-            const data = resp?.data ?? resp ?? {};
-            const accessToken =
-                pick(resp, "accessToken", "token") ??
-                pick(data, "accessToken", "token");
-
-            const guestId =
-                pick(resp, "guestId") ??
-                pick(data, "guestId") ??
-                null;
-
-            // 3) Persist session
+            setAuthSubmitting(true);
             try {
-                if (accessToken) {
-                    localStorage.setItem("accessToken", accessToken);
-                }
-
-                // Minimal identity for UI; roles include guest variants for safety
-                const identity = {
+                 const guestId =
+                       (crypto?.randomUUID && `guest:${crypto.randomUUID()}`) ||
+                       `guest:${Math.random().toString(36).slice(2)}`;
+                 const identity = {
+                       id: guestId,            // <- store as id for convenience
+                       guestId,                // <- also explicit
                     displayName,
-                    isGuest: true,
-                    roles: ["ROLE_GUEST", "GUEST"],
-                    guestId,
-                };
-                localStorage.setItem("authIdentity", JSON.stringify(identity));
-                localStorage.setItem("guestIdentity", JSON.stringify(identity));
-            } catch {
-                // best-effort; keep going even if storage fails
-            }
+                      isGuest: true,
+                       roles: ["ROLE_GUEST", "GUEST"],
+                    };
 
-            // 4) Optionally fetch /me (if backend supports for guests)
-            try {
-                if (typeof api.me === "function") {
-                    const user = await api.me();
-                    setMe(user || { displayName, isGuest: true, roles: ["ROLE_GUEST", "GUEST"] });
-                } else {
-                    setMe({ displayName, isGuest: true, roles: ["ROLE_GUEST", "GUEST"] });
+                try {
+                    localStorage.setItem("authIdentity", JSON.stringify(identity));
+                    localStorage.setItem("guestIdentity", JSON.stringify(identity));
+                } catch {
+                    /* best-effort */
                 }
+
+                setMe(identity);
+                showToast(`Welcome ${displayName}`, "success");
+
+                // Redirect (support ?next=…)
+                const params = new URLSearchParams(window.location.search);
+                const next = params.get("next");
+                const target = next && /^\/[^\s]*$/.test(next) ? next : "/";
+                window.location.replace(target);
             } catch {
-                setMe({ displayName, isGuest: true, roles: ["ROLE_GUEST", "GUEST"] });
+                showToast("Guest login failed", "error");
+            } finally {
+                setAuthSubmitting(false);
             }
-
-            showToast(`Welcome ${displayName}`, "success");
-
-            // 5) Redirect (support ?next=…)
-            const params = new URLSearchParams(window.location.search);
-            const next = params.get("next");
-            const target = (next && /^\/[^\s]*$/.test(next)) ? next : "/"; // basic safety
-            window.location.replace(target);
-        } catch (e) {
-            const msg =
-                e?.response?.data?.message ||
-                e?.message ||
-                "Guest login failed";
-            showToast(msg, "error");
-        } finally {
-            setAuthSubmitting(false);
-        }
-    }, [showToast, setAuthSubmitting, setMe]);
-
+        },
+        [showToast]
+    );
 
     // 4) Logout
     const handleLogout = useCallback(async () => {
-        try { await api.logout?.(); } catch { /* empty */ }
         try {
-            localStorage.removeItem("guestIdentity"); // in case legacy guest existed
+            await api.logout?.();
+        } catch {
+            /* empty */
+        }
+        try {
+            localStorage.removeItem("guestIdentity");
             localStorage.removeItem("accessToken");
             localStorage.removeItem("refreshToken");
             localStorage.removeItem("authIdentity");
@@ -214,8 +215,8 @@ export default function JoinPage() {
                     me={me}
                     authTried={authTried}
                     onLogin={handleLogin}
-                    onGuestLogin={handleGuestLogin}   // still pass handler to show the toast
-                    guestDisabled={true}              // if AuthGate supports this, it will gray out the button
+                    onGuestLogin={handleGuestLogin}  // enabled for anonymous ROLE_GUEST
+                    guestDisabled={false}
                     loading={false}
                     match={null}
                     onLogout={handleLogout}

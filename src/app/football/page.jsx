@@ -142,7 +142,7 @@ function getMeFromStorage() {
                 a?.user?.authorities ??
                 [];
             base = {
-                id: String(a?.id ?? a?.userId ?? a?.user?.id ?? ""),
+                id: String(a?.guestId ?? a?.id ?? a?.userId ?? a?.user?.id ?? ""),
                 username: String(a?.username ?? a?.user?.username ?? ""),
                 displayName: String(
                     a?.displayName ??
@@ -325,7 +325,7 @@ export default function Page() {
     }, [storedRoles, jwtRoles]);
 
     const currentUserId = useMemo(() => (myId ? String(myId) : ""), [myId]);
-    const effectiveUserId = isGuest ? (jwtSubject || "") : currentUserId; // guests use subject ("guest:<uuid>")
+    const effectiveUserId = isGuest ? (myId || jwtSubject || "") : currentUserId; // guests use subject ("guest:<uuid>")
     const greetingName = myName || myUsername || "Player";
 
     /* -------- matches & ui -------- */

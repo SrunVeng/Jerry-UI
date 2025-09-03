@@ -4,17 +4,30 @@
 const BASE_URL = (
     // eslint-disable-next-line no-undef
     (typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_API_BASE_URL) ||
-     "https://jerry-server-dm4m.onrender.com/api"
-     // "http://localhost:8080/api"
+     //"https://jerry-server-dm4m.onrender.com/api"
+      "http://localhost:8080/api"
 ).replace(/\/+$/, "");
 
 const USE_COOKIES = false; // set true only if your backend uses cookie sessions
-const LOGIN_PATH = "/auth"; // where to send users to re-auth
+const LOGIN_PATH = "/"; // where to send users to re-auth
 
 /* ---------------- helpers ---------------- */
 function fullUrl(path) {
     const p = path.startsWith("/") ? path : `/${path}`;
     return `${BASE_URL}${p}`;
+}
+
+function readGuest() {
+    try { return JSON.parse(localStorage.getItem("guestIdentity") || "null"); }
+    catch { return null; }
+}
+
+function clearTokensOnly() {
+    try {
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("AccessToken");
+        localStorage.removeItem("refreshToken");
+    } catch {}
 }
 
 function normalizeRoleString(input) {
@@ -76,24 +89,34 @@ function setTokensFromLoginResponse(res) {
 
 function clearAuth() {
     try {
+        localStorage.removeItem("guestIdentity");
         localStorage.removeItem("accessToken");
         localStorage.removeItem("AccessToken");
         localStorage.removeItem("refreshToken");
         localStorage.removeItem("authIdentity");
     } catch { /* empty */ }
 }
+function isAuthPath(path) {
+    const p = path.startsWith("/") ? path : `/${path}`;
+    return p.startsWith("/auth/user/login") || p.startsWith("/auth/user/login/refresh-token");
+}
+
+function isGuestMode() {
+    try {
+        const g = JSON.parse(localStorage.getItem("guestIdentity") || "null");
+        return !!(g && g.isGuest);
+    } catch { return false; }
+}
 
 function redirectToLogin() {
     try {
-        const here =
-            (typeof window !== "undefined" &&
-                window.location &&
-                window.location.pathname + window.location.search) || "/";
-        if (typeof window !== "undefined" && !here.startsWith(LOGIN_PATH)) {
-            const to = `${LOGIN_PATH}?next=${encodeURIComponent(here)}`;
-            window.location.replace(to);
-        }
-    } catch { /* empty */ }
+        if (typeof window === "undefined") return;
+        const target = LOGIN_PATH || "/";
+        const here = (window.location.pathname || "") + (window.location.search || "");
+        // If already on '/', force a reload so guards re-evaluate
+        if (here === target) window.location.reload();
+        else window.location.replace(target);
+    } catch { /* ignore */ }
 }
 
 /* --------------- core request (refresh-once) --------------- */
@@ -119,9 +142,21 @@ async function request(path, options = {}) {
             signal: controller.signal,
         };
 
+        // Attach guest identity headers (CORS needs to allow these; see backend)
         if (!USE_COOKIES) {
-            const token = getToken();
-            if (token) init.headers["Authorization"] ||= `Bearer ${token}`;
+            try {
+                const g = JSON.parse(localStorage.getItem("guestIdentity") || "{}");
+                if (g?.isGuest) {
+                    if (g.guestId || g.id) init.headers["X-Guest-Id"] = String(g.guestId || g.id);
+                    if (g.displayName)     init.headers["X-Guest-Name"] = String(g.displayName);
+                }
+            } catch {}
+        }
+
+        // 🔐 Attach bearer token for ALL non-auth endpoints
+        const token = getToken();
+        if (token && !isAuthPath(path) && !isGuestMode()) {
+            init.headers["Authorization"] ||= `Bearer ${token}`;
         }
 
         if (body !== undefined) {
@@ -129,7 +164,7 @@ async function request(path, options = {}) {
                 init.body = body;
                 init.headers["Content-Type"] ||= "application/json";
             } else if (body instanceof FormData || body instanceof Blob) {
-                init.body = body; // browser sets content-type
+                init.body = body;
             } else {
                 init.body = JSON.stringify(body);
                 init.headers["Content-Type"] ||= "application/json";
@@ -137,17 +172,16 @@ async function request(path, options = {}) {
         }
 
         const res = await fetch(fullUrl(path), init);
-
         const contentType = (res.headers.get("content-type") || "").toLowerCase();
         const isJson = contentType.includes("json");
-        const payload = isJson
-            ? await res.json().catch(() => null)
-            : await res.text().catch(() => "");
+        const payload = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
 
         if (!res.ok) {
-            // 401 → try refresh once
+            // ⛳ 401 → try refresh once, then replay with fresh token
             if (res.status === 401 && !_retry) {
                 const rt = getRefreshToken();
+
+                // If we have a refresh token, try normal refresh flow
                 if (rt) {
                     try {
                         const refreshRes = await fetch(fullUrl("/auth/user/login/refresh-token"), {
@@ -167,14 +201,27 @@ async function request(path, options = {}) {
                             if (newAccess) {
                                 setAccessToken(newAccess);
                                 if (newRefresh) setRefreshToken(newRefresh);
-                                const retryHeaders = { ...headers, Authorization: `Bearer ${newAccess}` };
+
+                                const retryHeaders = {
+                                    ...headers,
+                                    Authorization: `Bearer ${newAccess}`,
+                                };
                                 return await request(path, { ...options, headers: retryHeaders, _retry: true });
                             }
                         }
-                    } catch { /* empty */ }
+                    } catch { /* ignore */ }
                 }
-                clearAuth();
-                redirectToLogin();
+
+                // 🧹 Refresh failed or no RT. If guest, DO NOT clear guestIdentity.
+                if (isGuestMode()) {
+                    // Only remove token bits so guest stays signed in as guest
+                    clearTokensOnly();
+                    // For guests, let the caller handle the 401 gracefully (no forced redirect)
+                } else {
+                    // Regular auth: clear everything and bounce to login
+                    clearAuth();
+                    redirectToLogin();
+                }
             }
 
             const msg =
@@ -187,7 +234,6 @@ async function request(path, options = {}) {
 
         if (res.status === 204) return null;
         if (!isJson) return null;
-
         return payload;
     } finally {
         clearTimeout(timer);
@@ -196,10 +242,21 @@ async function request(path, options = {}) {
 
 /* ---------------- public api ---------------- */
 export const api = {
-    isAuthenticated() { return !!getToken(); },
+    isAuthenticated() {
+        try { return !!getToken() || !!localStorage.getItem("guestIdentity"); }
+        catch { return !!getToken(); }
+    },
 
     /* ----- Auth ----- */
     async logout() {
+        // If guest, just clear guest and reload; don't ping /auth/logout
+        if (isGuestMode()) {
+            try { localStorage.removeItem("guestIdentity"); } catch {}
+            // Optional: also clear any stray tokens for safety
+            clearTokensOnly();
+            redirectToLogin();
+            return;
+        }
         try { await request("/auth/logout", { method: "POST" }); }
         finally { clearAuth(); redirectToLogin(); }
     },
@@ -289,12 +346,10 @@ export const api = {
         return request(`/match/leave/${encodeURIComponent(id)}`, { method: "POST" });
     },
 
-    guestAuth(data) {
-        return request("/auth/guest/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-        });
+    async guestAuth(data) {
+        clearTokensOnly();
+        try { localStorage.setItem("guestIdentity", JSON.stringify({ isGuest: true, ...data })); } catch {}
+        return Promise.resolve({ ok: true, ...data });
     },
 
 
